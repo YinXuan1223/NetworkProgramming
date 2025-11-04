@@ -7,6 +7,15 @@ PROGS =	tcpcli01 tcpcli04 tcpcli05 tcpcli06 \
 
 all:	${PROGS}
 
+112550032_ass1:	112550032_ass1.o
+		${CC} ${CFLAGS} -o $@ 112550032_ass1.o ${LIBS}
+
+112550032_ass2:	112550032_ass2.o
+		${CC} ${CFLAGS} -o $@ 112550032_ass2.o ${LIBS}
+
+112550032_ass3:	112550032_ass3.o
+		${CC} ${CFLAGS} -o $@ 112550032_ass3.o ${LIBS}
+
 tcpcli01:	tcpcli01.o
 		${CC} ${CFLAGS} -o $@ tcpcli01.o ${LIBS}
 
