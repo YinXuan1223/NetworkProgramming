@@ -7,11 +7,19 @@ PROGS =	tcpcli01 tcpcli04 tcpcli05 tcpcli06 \
 
 all:	${PROGS}
 
-our_server: our_server.o
-		${CC} ${CFLAGS} -o $@ our_server.o ${LIBS}
 
-our_client: our_client.o
-		${CC} ${CFLAGS} -o $@ our_client.o ${LIBS} -lncurses
+
+gpt_srv: gpt_srv.o
+		${CC} ${CFLAGS} -o $@ gpt_srv.o ${LIBS}
+
+gpt_cli: gpt_cli.o
+		${CC} ${CFLAGS} -o $@ gpt_cli.o ${LIBS} -lncurses
+
+server: server.o
+		${CC} ${CFLAGS} -o $@ server.o ${LIBS}
+
+client: client.o
+		${CC} ${CFLAGS} -o $@ client.o ${LIBS} -lncurses
 
 112550032_ass1:	112550032_ass1.o
 		${CC} ${CFLAGS} -o $@ 112550032_ass1.o ${LIBS}
