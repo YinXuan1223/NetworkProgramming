@@ -12,6 +12,36 @@ int game_started = 0;
 
 char board[MAP_H][MAP_W];
 
+char id_to_char(int id){
+    char c;
+    switch (id)
+    {
+    case 1:
+        c = 'a';
+        break;
+    case 2:
+        c = 'b';
+        break;
+    case 3:
+        c = '1';
+        break;
+    case 4:
+        c = '2';
+        break;
+    case 5:
+        c = '3';
+        break;
+    case 6:
+        c = '4';
+        break;
+
+    default:
+        c = ' ';
+        break;
+    }
+    return c;
+}
+
 void init_board() {
     for (int y=0; y<MAP_H; y++)
         for (int x=0; x<MAP_W; x++)
@@ -30,6 +60,7 @@ void draw_ui() {
     clear();
     draw_board();
     mvprintw(MAP_H+1, 0, "w/a/s/d move | i/j/k/l shoot | q quit");
+    mvprintw(MAP_H+3, 0, "love u");
     refresh();
 }
 
@@ -49,14 +80,14 @@ void process_line(char *line) {
         draw_ui();
     }
     else if (strncmp(line, "STATE", 5) == 0) {
-        // ignore header
+        init_board();
     }
     else if (line[0] == 'P') {
-        int id, role, x, y, hp;
-        if (sscanf(line, "P %d %d %d %d %d", &id, &role, &x, &y, &hp) == 5) {
+        int id, role, x, y, blood;
+        if (sscanf(line, "P %d %d %d %d %d", &id, &role, &x, &y, &blood) == 5) {
             if (x>=0 && x<MAP_W && y>=0 && y<MAP_H) {
-                if (hp > 0) board[y][x] = (role==1?'G':'H');
-                else board[y][x] = 'X';
+                if (blood > 0) board[y][x] = id_to_char(id);
+                else board[y][x] = '.';
             }
         }
         draw_ui();
@@ -80,33 +111,24 @@ void process_line(char *line) {
     }
 }
 
-/* ----- ROBUST TCP STREAM PARSER ----- */
+
 void *recv_thread(void *arg) {
     static char buf[MAXLINE];
     static char linebuf[MAXLINE];
     int linepos = 0;
 
     while (1) {
-        int n = recv(sockfd, buf, sizeof(buf), 0);
-        if (n <= 0) break;
-
-        for (int i=0; i<n; i++) {
-            char c = buf[i];
-
-            if (c == '\n') {
-                linebuf[linepos] = 0;
-                process_line(linebuf);
-                linepos = 0;
-            } else {
-                if (linepos < MAXLINE-1)
-                    linebuf[linepos++] = c;
-            }
+    
+        if(Readline(sockfd, buf, MAXLINE)<0){
+            err_quit("str_cli: server terminated prematurely");
         }
+        process_line(buf);
+        
     }
     return NULL;
 }
 
-/* ----- input thread ----- */
+
 void *input_thread(void *arg) {
     while (1) {
         int ch = getch();
@@ -131,29 +153,33 @@ void *input_thread(void *arg) {
 }
 
 int main(int argc, char *argv[]) {
+
+    
+    struct sockaddr_in	servaddr;
+
     if (argc < 2) {
         printf("usage: %s <server_ip>\n", argv[0]);
         return 1;
     }
 
+   
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    
+    bzero(&servaddr, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_port = htons(9877);
+    inet_pton(AF_INET, argv[1], &servaddr.sin_addr);
 
-    struct sockaddr_in serv;
-    memset(&serv, 0, sizeof(serv));
-    serv.sin_family = AF_INET;
-    serv.sin_port = htons(9877);
-    inet_pton(AF_INET, argv[1], &serv.sin_addr);
-
-    if (connect(sockfd, (struct sockaddr*)&serv, sizeof(serv)) < 0) {
-        perror("connect");
-        return 1;
-    }
+    Connect(sockfd, (SA*)&servaddr, sizeof(servaddr));
+      
 
     // ncurses setup
-    initscr();
-    noecho();
-    cbreak();
-    keypad(stdscr, TRUE);
+    initscr();  // init ncurse screen
+    noecho();   // 不會把鍵盤輸入顯示出來
+    cbreak();   
+    keypad(stdscr, TRUE);   // 可加特殊建
+
+    mvprintw(MAP_H+10, 0, "new client\n"); // 測試的輸出
 
     pthread_t t1, t2;
     pthread_create(&t1, NULL, recv_thread, NULL);
