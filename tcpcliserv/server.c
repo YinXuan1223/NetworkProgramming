@@ -78,61 +78,75 @@ void init_rooms() {
     }
 }
 
+void handle_move(char* cmd, Room *rm, PlayerSlot *ps){
+    char d = cmd[5];
+    int nx = ps->x, ny = ps->y;
+    if (d=='U') ny--;
+    else if (d=='D') ny++;
+    else if (d=='L') nx--;
+    else if (d=='R') nx++;
+    if (nx>=0 && nx<MAP_W && ny>=0 && ny<MAP_H) {
+        ps->x = nx; ps->y = ny;
+        char ev[128];
+        snprintf(ev, sizeof(ev), "MOVE %d %d %d\n", ps->prid, ps->x, ps->y);
+        broadcast_room(rm, ev);
+    }
+}
 
+void handle_shoot(char* cmd, Room *rm, PlayerSlot *ps){
+
+    char d = cmd[6];
+    int distant = cmd[8]; 
+    int tx = ps->x, ty = ps->y;
+    if (d=='U') ty--;
+    else if (d=='D') ty++;
+    else if (d=='L') tx--;
+    else if (d=='R') tx++;
+    if (tx>=0 && tx<MAP_W && ty>=0 && ty<MAP_H) {
+        rm->bullet_cnt--;
+        int hit_id = -1;
+        for (int i=0;i<MAXPLAYER;i++) {
+            if (!rm->players[i].used) continue;
+            PlayerSlot *other = &rm->players[i];
+            if (other->x==tx && other->y==ty && other->blood>0) {
+                other->blood -= 1;
+                hit_id = other->prid;
+                
+                char ev[128];
+                if(other->blood==0) snprintf(ev, sizeof(ev), "DIE %d %d %d %d %d\n", ps->prid, other->prid, tx, ty, rm->bullet_cnt); // 格式 : 發射的人, 被射中的人, 最後子彈x, 最後子彈y, 剩餘子彈 (有死)
+                else snprintf(ev, sizeof(ev), "HIT %d %d %d %d %d\n", ps->prid, other->prid, tx, ty, rm->bullet_cnt); // 格式 : 發射的人, 被射中的人, 最後子彈x, 最後子彈y, 剩餘子彈 (沒死)
+                broadcast_room(rm, ev);
+                break;
+            }
+        }
+        if (hit_id==-1) {
+            char ev[128];
+            snprintf(ev, sizeof(ev), "BULLET %d %d %d %d %d\n", ps->prid, -100, tx, ty, rm->bullet_cnt); // 格式 : 發射的人, 被射中的人(沒人被射中 -100), 最後子彈x, 最後子彈y, 剩餘子彈
+            broadcast_room(rm, ev);
+        }
+    }
+}
 void handle_player_cmd(Room *rm, PlayerSlot *ps, const char *line) {
+
     char cmd[128];
     strncpy(cmd, line, sizeof(cmd)-1);
     cmd[sizeof(cmd)-1]=0;
-    if (strncmp(cmd, "MOVE ",5)==0) {
-        char d = cmd[5];
-        int nx = ps->x, ny = ps->y;
-        if (d=='U') ny--;
-        else if (d=='D') ny++;
-        else if (d=='L') nx--;
-        else if (d=='R') nx++;
-        if (nx>=0 && nx<MAP_W && ny>=0 && ny<MAP_H) {
-            ps->x = nx; ps->y = ny;
-            char ev[128];
-            snprintf(ev, sizeof(ev), "MOVE %d %d %d\n", ps->prid, ps->x, ps->y);
-            broadcast_room(rm, ev);
-        }
+    
+    if (strncmp(cmd, "MOVE ",5)==0) { //cmd 要長 "MOVE (方向)" 
+        handle_move(cmd, rm, ps);
     } 
-	else if (strncmp(cmd, "SHOOT ",6)==0) {
-        char d = cmd[6];
-        int tx = ps->x, ty = ps->y;
-        if (d=='U') ty--;
-        else if (d=='D') ty++;
-        else if (d=='L') tx--;
-        else if (d=='R') tx++;
-        if (tx>=0 && tx<MAP_W && ty>=0 && ty<MAP_H) {
-            int hit_id = -1;
-            for (int i=0;i<MAXPLAYER;i++) {
-                if (!rm->players[i].used) continue;
-                PlayerSlot *other = &rm->players[i];
-                if (other->x==tx && other->y==ty && other->blood>0) {
-                    other->blood -= 1;
-                    hit_id = other->prid;
-                    char ev[128];
-                    snprintf(ev, sizeof(ev), "HIT %d %d %d\n", ps->prid, other->prid, other->blood);
-                    broadcast_room(rm, ev);
-                    break;
-                }
-            }
-            if (hit_id==-1) {
-                char ev[128];
-                snprintf(ev, sizeof(ev), "BULLET %d %c %d %d\n", ps->prid, d, tx, ty);
-                broadcast_room(rm, ev);
-            }
-        }
+	else if (strncmp(cmd, "SHOOT ",6)==0) { //cmd 要長 "SHOOT (方向) (距離)" (目前都還是1)
+        handle_shoot(cmd, rm, ps);
     } 
 	else if (strncmp(cmd, "QUIT",4)==0) {
         ps->used = 0;
-        close(ps->fd);
+        
         ps->fd = -1;
         rm->player_cnt--;
         char ev[128];
         snprintf(ev, sizeof(ev), "PLAYER_LEFT %d\n", ps->prid);
         broadcast_room(rm, ev);
+        close(ps->fd);
     }
 }
 
@@ -153,7 +167,7 @@ void *game_loop(void *arg) {
 
     Room *rm = (Room*)arg;
     int tick = 0;
-    const int TICK_MS = 200;
+    // const int TICK_MS = 200;
 
     for(int i=0 ; i<MAXPLAYER; i++){
 		rm->players[i].x = rand() % MAP_W;
@@ -161,34 +175,60 @@ void *game_loop(void *arg) {
 		// 還沒想好如果重疊怎麼辦
 	}
 
-    for( ; ; ){
-        
-        if (rm->status != 1) break;
 
-        for (int i = 0;i < MAXPLAYER; i++) {
+
+    fd_set readfds;
+    struct timeval tv;
+    int maxfd = 0;
+
+    while (rm->status == 1) {
+        FD_ZERO(&readfds);
+
+        for (int i = 0; i < MAXPLAYER; i++) {
+            if (!rm->players[i].used) continue;
+            FD_SET(rm->players[i].fd, &readfds);
+            if (rm->players[i].fd > maxfd)
+                maxfd = rm->players[i].fd;
+        }
+
+        tv.tv_sec = 0;
+        tv.tv_usec = 200 * 1000; // 等同 TICK_MS = 200ms
+
+        // 等待可讀事件或 timeout
+        int ready = select(maxfd + 1, &readfds, NULL, NULL, &tv);
+
+        if (ready < 0) {
+            perror("select error");
+            break;
+        }
+
+        // 處理有資料的玩家
+        for (int i = 0; i < MAXPLAYER; i++) {
             if (!rm->players[i].used) continue;
             int fd = rm->players[i].fd;
-            char buf[MAXLINE];
-            int n = recv(fd, buf, sizeof(buf)-1, MSG_DONTWAIT);
-            if (n > 0) {
-                buf[n]=0;
-                char *p = strtok(buf, "\n");
-                while (p) {
-                    handle_player_cmd(rm, &rm->players[i], p);
-                    p = strtok(NULL, "\n");
+            if (FD_ISSET(fd, &readfds)) {
+                char buf[MAXLINE];
+                int n = recv(fd, buf, sizeof(buf) - 1, 0);
+                if (n > 0) {
+                    buf[n] = 0;
+                    char *p = strtok(buf, "\n");
+                    while (p) {
+                        handle_player_cmd(rm, &rm->players[i], p);
+                        p = strtok(NULL, "\n");
+                    }
+                } else if (n == 0) {
+                    rm->players[i].used = 0;
+                    close(fd);
+                    rm->players[i].fd = -1;
+                    rm->player_cnt--;
                 }
-            } else if (n==0) {
-                rm->players[i].used = 0;
-                close(fd);
-                rm->players[i].fd = -1;
-                rm->player_cnt--;
             }
         }
 
         tick++;
         update_state(tick, rm);
-        usleep(TICK_MS * 1000);
     }
+
     return NULL;
 }
 
@@ -259,7 +299,7 @@ void assign_client_to_room(int clientfd) {
 
 int main(int argc, char **argv){
 
-	printf("server start!\n");
+	printf("handle move server start!\n");
 
 	int					listenfd, connfd;
 	socklen_t			clilen;

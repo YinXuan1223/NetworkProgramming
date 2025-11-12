@@ -10,7 +10,8 @@
 int sockfd;
 int game_started = 0;
 
-char board[MAP_H][MAP_W];
+char board[MAP_H][MAP_W+1];
+WINDOW *mapwin;
 
 char id_to_char(int id){
     char c;
@@ -43,9 +44,10 @@ char id_to_char(int id){
 }
 
 void init_board() {
-    for (int y=0; y<MAP_H; y++)
-        for (int x=0; x<MAP_W; x++)
-            board[y][x] = '.';
+    for (int y=0; y<MAP_H; y++){
+        for (int x=0; x<MAP_W; x++) board[y][x] = '.';
+        board[y][MAP_W]=0;
+    }
 }
 
 void draw_board() {
@@ -75,6 +77,11 @@ void process_line(char *line) {
         refresh();
     }
     else if (strncmp(line, "GAME_START", 10) == 0) {
+        game_started = 1;
+        init_board();
+        draw_ui();
+    }
+    else if (strncmp(line, "PLAYER_LEFT", 11) == 0) {
         game_started = 1;
         init_board();
         draw_ui();
