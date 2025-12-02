@@ -2,8 +2,8 @@
 
 #define     MAXROOM 10
 #define		MAXPLAYER 3
-#define     MAP_W 10
-#define     MAP_H 10
+#define     MAP_W 20
+#define     MAP_H 12
 
 
 typedef struct{
@@ -108,7 +108,7 @@ void handle_shoot(char* cmd, Room *rm, PlayerSlot *ps){
         for (int i=0;i<MAXPLAYER;i++) {
             if (!rm->players[i].used) continue;
             PlayerSlot *other = &rm->players[i];
-            if (other->x==tx && other->y==ty && other->blood>0) {
+            if (other->x==tx && other->y==ty && other->blood>0 && other->role == 1) {
                 other->blood -= 1;
                 hit_id = other->prid;
                 
