@@ -1,6 +1,6 @@
 include ../Make.defines
 
-PROGS =	server client hard_server
+PROGS =	client hard_server
 
 all:	${PROGS}
 

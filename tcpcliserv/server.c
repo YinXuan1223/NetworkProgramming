@@ -39,6 +39,7 @@ typedef struct{
 	MapGrid* map[MAP_H][MAP_W];
 	
 	int bullet_cnt;
+    int is_together;
 } Room;
 
 Room rooms[MAXROOM];
@@ -75,6 +76,7 @@ void init_rooms() {
             for (int x = 0; x < MAP_W; x++) rm -> map[y][x] = NULL;
         }
 		rm -> bullet_cnt = 50;
+        
     }
 }
 

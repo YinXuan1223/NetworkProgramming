@@ -1,7 +1,7 @@
 #include	"unp.h"
 
 #define     MAXROOM 10
-#define		MAXPLAYER 3
+#define		MAXPLAYER 6
 #define     MAP_W 20
 #define     MAP_H 12
 #define     RELOGIN_Q_SIZE 1024
@@ -17,9 +17,14 @@ typedef struct{
 	int blood;
 	int extra_blood;
 
-	int distance;
-	int movement;
+	int can_shoot; // 0 human or ghost_mover, 1 ghost_origin, 2 ghost_shooter
+	int can_move; // 0 ghost_shooter, 1 others
+    int can_shield; 
 
+    int shoot_cdtimer;
+    int shield_cdtimer;
+
+    int is_combined;
 	int is_alive;
     int is_ingame;
 
@@ -28,6 +33,7 @@ typedef struct{
 typedef struct{
     int has_init_player;
     int shield;
+    int shield_by;
 	int shield_timer;
 } MapGrid;
 
@@ -35,7 +41,7 @@ typedef struct{
 	int rid;
 	int status;	// 0 waiting, 1 running
 	int player_cnt;
-	PlayerSlot players[MAXPLAYER];
+	PlayerSlot players[MAXPLAYER+1];
 	MapGrid map[MAP_H][MAP_W];
 	
 	int bullet_cnt;
@@ -77,7 +83,7 @@ int set_nonblock(int fd){
 }
 
 void broadcast_room(Room *rm, char *msg) {
-    for (int i = 0; i < MAXPLAYER; i++) {
+    for (int i = 1; i <= MAXPLAYER; i++) {
         if (!rm->players[i].is_alive) continue;
         int fd = rm->players[i].fd;
         if (fd >= 0) {
@@ -92,24 +98,29 @@ void init_room(int rid) {
     rm -> rid = rid+1;
     rm -> status = 0;
     rm -> player_cnt = 0;
-    for (int i = 0; i < MAXPLAYER; i++) {
+    for (int i = 1; i <= MAXPLAYER; i++) {
         rm -> players[i].fd = -1;
         rm -> players[i].is_alive = 0;
         rm -> players[i].is_ingame = 0;
+        rm -> players[i].is_combined = 0;
     }
     for (int y = 0; y < MAP_H; y++) {
         for (int x = 0; x < MAP_W; x++){
             rm -> map[y][x].shield = 0;
-            rm -> map[y][x].shield_timer = 0;
+            rm -> map[y][x].shield_timer = 25;
             rm -> map[y][x].has_init_player = 0;
+            rm -> map[y][x].shield_by = -1;
         } 
     }
     rm -> bullet_cnt = 50;
-    rm -> global_timer = 0; // 5 minutes
+    rm -> global_timer = 1500; // 5 minutes
 
 }
 
 void handle_move(char* cmd, Room *rm, PlayerSlot *ps){
+
+    if(!ps->can_move) return;
+
     char d = cmd[5];
     int nx = ps->x, ny = ps->y;
     if (d=='U') ny--;
@@ -125,11 +136,13 @@ void handle_move(char* cmd, Room *rm, PlayerSlot *ps){
 }
 
 void shooting(Room *rm, int tx, int ty, PlayerSlot *ps, int is_first){
+
     if (tx>=0 && tx<MAP_W && ty>=0 && ty<MAP_H) {
-        if(is_first) rm->bullet_cnt--;
+        
+        rm->bullet_cnt--; // 這種寫法合體會一次扣兩顆
 
         int hit_id = -1;
-        for (int i=0;i<MAXPLAYER;i++) {
+        for (int i=1;i<=MAXPLAYER;i++) {
             if (!rm->players[i].is_alive) continue;
             PlayerSlot *other = &rm->players[i];
             if (other->x==tx && other->y==ty && other->blood>0 && other->role == 1 && !rm->map[ty][tx].shield) {
@@ -155,38 +168,105 @@ void shooting(Room *rm, int tx, int ty, PlayerSlot *ps, int is_first){
 
 void handle_shoot(char* cmd, Room *rm, PlayerSlot *ps){
 
+    if(!ps->can_shoot) return;
+
     char d = cmd[6]; // SHOOT U 2
-    int distant = cmd[8]; 
-    int x = ps->x, y = ps->y, tx, ty, ttx, tty;
+    char distant = cmd[8]; 
+    int x = ps->x, y = ps->y, tx=-1, ty=-1, ttx=-1, tty=-1;
     if (d=='U') { ty = y-1; tty = y-2; tx = x, ttx =x; }
     else if (d=='D') { ty = y+1; tty = y+2; tx = x, ttx =x; }
     else if (d=='L') { ty = y; tty = y; tx = x-1, ttx =x-2; }
     else if (d=='R') { ty = y; tty = y; tx = x+1, ttx =x+2; }
     
     shooting(rm, tx, ty, ps, 1);
-    if(d=='1') return;
+
+    if(distant == '1') {
+        ps->can_shoot = 0;
+        return;
+    }
+    if(ps->can_shoot!=2) return;
+
     shooting(rm, ttx, tty, ps, 0);
+    ps->can_shoot = 0;
 
 }
 
 void handle_shield(char* cmd, Room *rm, PlayerSlot *ps){
 
+    if(!ps->can_shield) return;
+    ps->can_shield=0;
 	int sld_x = ps -> x;
 	int sld_y = ps -> y;
 	rm -> map[sld_y][sld_x].shield = 1;
 	rm -> map[sld_y][sld_x].shield_timer = 50;
+    rm -> map[sld_y][sld_x].shield_by = ps->prid;
 	char ev[128];
 	sprintf(ev, "SHIELD %d %d %d", ps->prid, sld_x, sld_y);
 	broadcast_room(rm, ev);
 
 }
 
-void handle_invite(char* cmd, Room *rm, PlayerSlot *ps){
-
+void handle_invite(char* cmd, Room *rm, PlayerSlot *ps){ //cmd 要長 "INVITE (邀請人) invites (被邀請人)"
+    char inviter = cmd[7], invitee = cmd[17];
+    char ev[128];
+    sprintf(ev, "INVITE %c invites %c\n", inviter, invitee);
+    broadcast_room(rm, ev); 
 }
 
-void handle_agree(char* cmd, Room *rm, PlayerSlot *ps){
+void handle_agree(char* cmd, Room *rm, PlayerSlot *ps){ // cmd 要長 "AGREE (被邀請人) agrees (邀請人)"
+    if(ps->is_combined) return;
+    int shooter = cmd[6]-'0', mover = cmd[15]-'0';
+
+    rm->players[shooter].is_combined = 1;
+    rm->players[shooter].can_move = 0;
+    rm->players[shooter].can_shoot = 2;
+    rm->players[mover].is_combined = 1;
+    rm->players[mover].can_shoot = 0;
     
+    char ev[128];
+    sprintf(ev, "AGREE %c agrees %c\n", shooter, mover);
+    broadcast_room(rm, ev);
+}
+
+void handle_disagree(char* cmd, Room *rm, PlayerSlot *ps){ // cmd 要長 "DISAGREE (被邀請人) disagrees (邀請人)"
+    if(ps->is_combined) return;
+    int shooter = cmd[9]-'0', mover = cmd[21]-'0';
+
+    char ev[128];
+    sprintf(ev, "DISAGREE %c disagrees %c\n", shooter, mover);
+    broadcast_room(rm, ev);
+}
+
+void handle_split(char* cmd, Room *rm, PlayerSlot *ps){ // cmd 要長 "SPLIT (某人) splits (某人)"
+    if(ps->is_combined) return;
+    int somebody1 = cmd[6]-'0', somebody2 = cmd[15]-'0';
+
+    int shooter, mover;
+    if(rm->players[somebody1].can_shoot==2){
+        shooter = somebody1;
+        mover = somebody2;
+    }
+    else{
+        shooter = somebody2;
+        mover = somebody1;
+    }
+    
+    rm->players[shooter].x = rm->players[mover].x;
+    rm->players[shooter].y = rm->players[mover].y;
+    rm->players[shooter].is_combined = 0;
+    rm->players[shooter].can_move = 1;
+    rm->players[shooter].can_shoot = 1;
+
+    rm->players[mover].is_combined = 0;
+    rm->players[mover].can_move = 1;
+    rm->players[mover].can_shoot = 1;
+    
+    char ev[128];
+    sprintf(ev, "SPLIT %c splits %c\n", shooter, mover);
+    broadcast_room(rm, ev);
+}
+void handle_rescue(char* cmd, Room *rm, PlayerSlot *ps){
+
 }
 
 
@@ -211,6 +291,9 @@ void handle_player_cmd(Room *rm, PlayerSlot *ps, const char *line) {
     else if (strncmp(cmd, "AGREE ", 6)==0){ // cmd 要長 "AGREE (被邀請人) agrees (邀請人)"
         handle_agree(cmd, rm, ps);
     }
+    else if (strncmp(cmd, "RESCUE ", 7)==0){
+        handle_rescue(cmd, rm, ps);
+    }
 	else if (strncmp(cmd, "QUIT",4)==0) {
         ps->is_alive = 0;
         ps->is_ingame = 0;
@@ -227,7 +310,7 @@ void update_state(int tick, Room* rm){
     char buf[MAXLINE];
     int off = 0;
     off += snprintf(buf+off, sizeof(buf)-off, "STATE %d %d\n", tick, rm->player_cnt);
-    for (int i=0;i<MAXPLAYER;i++) {
+    for (int i=1;i<=MAXPLAYER;i++) {
         if (!rm->players[i].is_alive) continue;
         PlayerSlot *ps = &rm->players[i];
         off += snprintf(buf+off, sizeof(buf)-off, "P %d %d %d %d %d\n",
@@ -240,11 +323,11 @@ int check_game_state(Room* rm){
 
     char ev[128];
     int human_cnt = 0;
-    for(int i=0 ; i<MAXPLAYER ; i++){
+    for(int i=1 ; i<=MAXPLAYER ; i++){
         if(rm->players[i].role==1 && rm->players[i].is_alive) human_cnt++;
     }
 
-    if(rm->global_timer>=1500 && human_cnt){ 
+    if(rm->global_timer<=0 && human_cnt){ 
         sprintf(ev, "Game Over! Human Win!\n");
         broadcast_room(rm, ev);
         return 1;
@@ -259,11 +342,52 @@ int check_game_state(Room* rm){
     return 0;
 }
 
+void control_timer(Room* rm){
+
+    for(int i=0; i<MAP_H ; i++){
+        for(int j=0; j<MAP_W ; j++){
+            if(rm->map[i][j].shield) {
+                rm->map[i][j].shield_timer--;
+                if(rm->map[i][j].shield_timer==0) {
+                    rm->map[i][j].shield_timer=25;
+                    rm->map[i][j].shield=0;
+                    rm->players[rm->map[i][j].shield_by].can_shield=1; // shield_by 是 pid, 從 1 開始
+                }
+            }
+        }
+    }
+
+    // 對 shoot 的檢查 (只看鬼)
+    for(int i=1 ; i<=2 ; i++){
+        if(rm->players[i].can_shoot) continue;
+    
+        rm->players[i].shoot_cdtimer--;
+        if(rm->players[i].shoot_cdtimer==0){
+            rm->players[i].shoot_cdtimer=25;
+            rm->players[i].can_shoot = 1;
+        }
+        
+    }
+
+    // 對 shield 的檢查 (只看人)
+    for(int i=3 ; i<=6 ; i++){
+        if(rm->players[i].can_shield) continue;
+    
+        rm->players[i].shield_cdtimer--;
+        if(rm->players[i].shield_cdtimer==0){
+            rm->players[i].shield_cdtimer=100;
+            rm->players[i].can_shield = 1;
+        }
+        
+    }
+}
+
 void *game_loop(void *arg) {
 
+    char buf[MAXLINE];
     Room *rm = (Room*)arg;
    
-    for(int i=0 ; i<MAXPLAYER; i++){ // random 出每個人的起始位置
+    for(int i=1 ; i<=MAXPLAYER; i++){ // random 出每個人的起始位置
 
         rm->players[i].x = rand() % MAP_W;
 		rm->players[i].y = rand() % MAP_H;
@@ -283,8 +407,8 @@ void *game_loop(void *arg) {
     while (rm->status == 1) {
         FD_ZERO(&readfds);
 
-        for (int i = 0; i < MAXPLAYER; i++) {
-            if (!rm->players[i].is_alive) continue;
+        for (int i = 1; i <=MAXPLAYER; i++) { // 把 ingame 的玩家放進 readfds
+            if (!rm->players[i].is_ingame) continue;
             FD_SET(rm->players[i].fd, &readfds);
             if (rm->players[i].fd > maxfd)
                 maxfd = rm->players[i].fd;
@@ -302,11 +426,11 @@ void *game_loop(void *arg) {
         }
 
         // 處理有資料的玩家
-        for (int i = 0; i < MAXPLAYER; i++) {
-            if (!rm->players[i].is_alive) continue;
+        for (int i = 1; i <= MAXPLAYER; i++) {
+            if (!rm->players[i].is_ingame) continue;
             int fd = rm->players[i].fd;
-            if (FD_ISSET(fd, &readfds)) {
-                char buf[MAXLINE];
+
+            if (FD_ISSET(fd, &readfds)) {    
                 int n = recv(fd, buf, sizeof(buf) - 1, 0);
                 if (n > 0) {
                     buf[n] = 0;
@@ -319,32 +443,31 @@ void *game_loop(void *arg) {
                         }
                         p = strtok(NULL, "\n");
                     }
-                } else if (n == 0) {
-                    rm->players[i].is_alive = 0;
+                } 
+                else if (n == 0) { // player 按 control C 關掉連線 (要更新 players 狀態，通知其他人)
+                    rm -> players[i].is_alive = 0;
+                    rm -> players[i].is_ingame = 0;
                     close(fd);
                     rm->players[i].fd = -1;
                     rm->player_cnt--;
+
+                    if(check_game_state(rm)){
+                        rm->status = 2;
+                        break;
+                    }
                 }
             }
         }
 
-        for(int i=0; i<MAP_H ; i++){
-            for(int j=0; j<MAP_W ; j++){
-                if(rm->map[i][j].shield) {
-                    rm->map[i][j].shield_timer--;
-                    if(rm->map[i][j].shield_timer==0) rm->map[i][j].shield=0;
-                }
-            }
-        }
+        control_timer(rm);
 
-
-        if(rm->global_timer==1500){
+        if(rm->global_timer==0){
             check_game_state(rm);
             rm->status = 2;
         }
 
         if(rm->status == 2) break;
-        rm->global_timer++;
+        rm->global_timer--;
         update_state(rm->global_timer, rm);
 
     }
@@ -352,14 +475,14 @@ void *game_loop(void *arg) {
     while(rm->player_cnt){ // 處理要不要繼續遊戲
 
         char buf[256];
-        for (int i = 0; i < MAXPLAYER; i++) {
+        for (int i = 1; i <= MAXPLAYER; i++) {
             if (!rm->players[i].is_ingame) continue;
 
             int fd = rm->players[i].fd;
             int n = recv(fd, buf, sizeof(buf)-1, MSG_DONTWAIT);
             if (n > 0) {
                 buf[n] = 0;
-                if (strstr(buf, "STAY")) {
+                if (strstr(buf, "KEEP")) {
                     enqueue_relogin(rm->players[i].fd);
                 } 
                 else if (strstr(buf, "LEAVE")) {
@@ -397,24 +520,33 @@ void start_room(Room *rm) {
 }
 
 void assign_client_to_room(int clientfd) {
+
     for (int r = 0; r < MAXROOM; r++) {
+
         Room *rm = &rooms[r];
-       
         if (rm->status == 0 && rm->player_cnt < MAXPLAYER) { //status: 0 waiting, 1 running
             
-			int idx = rm->player_cnt;
-            rm->players[idx].is_alive = 1;
-            rm->players[idx].is_ingame = 1;
+			int idx = rm->player_cnt+1;
             rm->players[idx].fd = clientfd;
-            rm->players[idx].prid = idx+1;
+            rm->players[idx].prid = idx; // 從 1 開始
             rm->players[idx].pgid = global_player_id++;
-            rm->players[idx].role = (idx==0 || idx==1) ? 0 : 1; // 前兩個是鬼
+            rm->players[idx].role = (idx==1 || idx==2) ? 0 : 1; // 前兩個是鬼
             rm->players[idx].x = 0; 
 			rm->players[idx].y = 0; 
+
 			rm->players[idx].blood = 2;
 			rm->players[idx].extra_blood = 1;
-            rm->players[idx].distance = 1;
-            rm->players[idx].movement = -1;
+
+            rm->players[idx].can_shoot = (idx==1 || idx==2) ? 0 : 1;
+            rm->players[idx].can_move = 1;
+            rm->players[idx].can_shield = 1;
+
+            rm->players[idx].shoot_cdtimer = 25;
+            rm->players[idx].shield_cdtimer = 100;
+
+            rm->players[idx].is_combined = 0;
+            rm->players[idx].is_alive = 1;
+            rm->players[idx].is_ingame = 1;
             rm->player_cnt++;
 
             // 個別針對 clientfd 送歡迎資訊
