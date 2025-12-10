@@ -107,7 +107,7 @@ void init_room(int rid) {
     for (int y = 0; y < MAP_H; y++) {
         for (int x = 0; x < MAP_W; x++){
             rm -> map[y][x].shield = 0;
-            rm -> map[y][x].shield_timer = 0;
+            rm -> map[y][x].shield_timer = 25;
             rm -> map[y][x].has_init_player = 0;
             rm -> map[y][x].shield_by = -1;
         } 
@@ -199,7 +199,6 @@ void handle_shield(char* cmd, Room *rm, PlayerSlot *ps){
 	int sld_y = ps -> y;
 	rm -> map[sld_y][sld_x].shield = 1;
 	rm -> map[sld_y][sld_x].shield_timer = 25;
-    rm -> map[sld_y][sld_x].shield_by = ps->prid;
 	char ev[128];
 	sprintf(ev, "SHIELD %d %d %d\n", ps->prid, sld_x, sld_y);
 	broadcast_room(rm, ev);
@@ -213,61 +212,8 @@ void handle_invite(char* cmd, Room *rm, PlayerSlot *ps){ //cmd 要長 "INVITE (�
     broadcast_room(rm, ev); 
 }
 
-void handle_agree(char* cmd, Room *rm, PlayerSlot *ps){ // cmd 要長 "AGREE (被邀請人) agrees (邀請人)"
-    if(ps->is_combined) return;
-    char shooter = cmd[6], mover = cmd[15];
-    int shooter_id = cmd[6]-'0', mover_id = cmd[15]-'0';
-
-    rm->players[shooter_id].is_combined = 1;
-    rm->players[shooter_id].can_move = 0;
-    rm->players[shooter_id].can_shoot = 2;
-    rm->players[mover_id].is_combined = 1;
-    rm->players[mover_id].can_shoot = 0;
+void handle_agree(char* cmd, Room *rm, PlayerSlot *ps){
     
-    char ev[128];
-    sprintf(ev, "AGREE %c agrees %c\n", shooter, mover);
-    broadcast_room(rm, ev);
-}
-
-void handle_disagree(char* cmd, Room *rm, PlayerSlot *ps){ // cmd 要長 "DISAGREE (被邀請人) disagrees (邀請人)"
-    if(ps->is_combined) return;
-    char shooter = cmd[9], mover = cmd[21];
-
-    char ev[128];
-    sprintf(ev, "DISAGREE %c disagrees %c\n", shooter, mover);
-    broadcast_room(rm, ev);
-}
-
-void handle_split(char* cmd, Room *rm, PlayerSlot *ps){ // cmd 要長 "SPLIT (某人) splits (某人)"
-    if(ps->is_combined) return;
-    int somebody1 = cmd[6]-'0', somebody2 = cmd[15]-'0';
-
-    int shooter, mover;
-    if(rm->players[somebody1].can_shoot==2){
-        shooter = somebody1;
-        mover = somebody2;
-    }
-    else{
-        shooter = somebody2;
-        mover = somebody1;
-    }
-    
-    rm->players[shooter].x = rm->players[mover].x;
-    rm->players[shooter].y = rm->players[mover].y;
-    rm->players[shooter].is_combined = 0;
-    rm->players[shooter].can_move = 1;
-    rm->players[shooter].can_shoot = 1;
-
-    rm->players[mover].is_combined = 0;
-    rm->players[mover].can_move = 1;
-    rm->players[mover].can_shoot = 1;
-    
-    char ev[128];
-    sprintf(ev, "SPLIT %c splits %c\n", shooter, mover);
-    broadcast_room(rm, ev);
-}
-void handle_rescue(char* cmd, Room *rm, PlayerSlot *ps){
-
 }
 
 
@@ -291,12 +237,6 @@ void handle_player_cmd(Room *rm, PlayerSlot *ps, const char *line) {
     }
     else if (strncmp(cmd, "AGREE ", 6)==0){ // cmd 要長 "AGREE (被邀請人) agrees (邀請人)"
         handle_agree(cmd, rm, ps);
-    }
-    else if (strncmp(cmd, "DISAGREE ", 9) == 0){
-        handle_disagree(cmd, rm, ps);
-    }
-    else if (strncmp(cmd, "RESCUE ", 7)==0){
-        handle_rescue(cmd, rm, ps);
     }
 	else if (strncmp(cmd, "QUIT",4)==0) {
         ps->is_alive = 0;
