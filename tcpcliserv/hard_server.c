@@ -201,7 +201,7 @@ void handle_shield(char* cmd, Room *rm, PlayerSlot *ps){
 	rm -> map[sld_y][sld_x].shield_timer = 50;
     rm -> map[sld_y][sld_x].shield_by = ps->prid;
 	char ev[128];
-	sprintf(ev, "SHIELD %d %d %d", ps->prid, sld_x, sld_y);
+	sprintf(ev, "SHIELD %d %d %d\n", ps->prid, sld_x, sld_y);
 	broadcast_room(rm, ev);
 
 }
@@ -282,7 +282,7 @@ void handle_player_cmd(Room *rm, PlayerSlot *ps, const char *line) {
 	else if (strncmp(cmd, "SHOOT ",6)==0) { //cmd 要長 "SHOOT (方向) (距離)" (目前都還是1)
         handle_shoot(cmd, rm, ps);
     } 
-	else if (strncmp(cmd, "SHIELD ",7)==0) {
+	else if (strncmp(cmd, "SHIELD",6)==0) {
 		handle_shield(cmd, rm, ps);
 	}
     else if (strncmp(cmd, "INVITE ", 7)==0){ // cmd 要長 "INVITE (邀請人) invites (被邀請人)"
