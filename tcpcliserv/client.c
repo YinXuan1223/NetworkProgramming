@@ -158,6 +158,7 @@ void draw_board()
 
 void draw_waiting_screen()
 {
+    clear();
     mvprintw(0, 0, "Waiting for other players...");
     init_board();
     draw_board();
