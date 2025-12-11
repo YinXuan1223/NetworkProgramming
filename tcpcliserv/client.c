@@ -19,8 +19,21 @@ int blood_bag = 1;
 int gun = 1; //1:can use 0:can't use
 int combine = 0; //0:can't 1:can 2:combining
 
-int bullet_x = -1, bullet_y = -1;
-int bullet_timer = 0;
+int bullet_x[2] = {-1, -1};
+int bullet_y[2] = {-1, -1};
+int bullet_timer[2] = {0, 0};
+int shooter_cooldown_timer[2] = {0, 0};
+
+int hit_color_timer[4] = {0, 0, 0, 0};
+int shield_cooldown_timer[4] = {0, 0, 0, 0};
+
+struct Shield
+{
+    int x, y;
+    int timer;
+};
+
+struct Shield shields[4];
 
 struct Player
 {
@@ -88,10 +101,57 @@ void draw_board()
     {
         for (int x = 0; x < MAP_W; x++) 
         {
-            char ch = board[y][x];
-            if (x == bullet_x && y == bullet_y && (x != players[1].x || y != players[1].y) && (x != players[2].x || y != players[2].y)) ch = '*';
+            int is_shield = 0;
+            for (int i = 0; i < 4; i++)
+            {
+                if (x == shields[i].x && y == shields[i].y && shields[i].timer != 0)
+                {
+                    attron(COLOR_PAIR(2));
+                    is_shield = 1;
+                    break;
+                }
+            }
 
-            mvaddch(y + 2, x, ch);
+            int red = 0;
+            int drawn = 0;
+
+            for (int i = 1; i <= 6; i++)
+            {
+                if (!players[i].live) continue;
+                if (x == players[i].x && y == players[i].y)
+                {
+                    //people
+                    if (i >= 3)
+                    {
+                        if (hit_color_timer[i - 3] % 2 == 1)
+                        {
+                            red = 1;
+                            attron(COLOR_PAIR(1));
+                        }
+                    }
+
+                    mvaddch(y + 2, x, players[i].id);
+                    if (red == 1) attroff(COLOR_PAIR(1));
+
+                    drawn = 1;
+                    break;
+                }
+            }
+
+            if (drawn == 0)
+            {
+                char ch = '.';
+                for (int i = 0; i < 2; i++)
+                {
+                    if (x == bullet_x[i] && y == bullet_y[i] && (x != players[1].x || y != players[1].y) && (x != players[2].x || y != players[2].y)) 
+                    {
+                        ch = '*';
+                        break;
+                    }
+                }
+                mvaddch(y + 2, x, ch);
+            }
+            if (is_shield == 1) attroff(COLOR_PAIR(2));
         }
     }
 }
@@ -142,6 +202,8 @@ void start_set()
 {
     for (int i = 1; i <= 6; i++)
     {
+        players[i].x = -1;
+        players[i].y = -1;
         players[i].live = 1;
         players[i].id = id_to_char(i);
         if (i >= 3)
@@ -156,6 +218,13 @@ void start_set()
             players[i].control = 0;
             players[i].combine = 0;
         }
+    }
+
+    for (int i = 0; i < 4; i++)
+    {
+        shields[i].x = -1;
+        shields[i].y = -1;
+        shields[i].timer = 0;
     }
 }
 
@@ -262,13 +331,43 @@ void process_line(char *line) {
     else if (strncmp(line, "STATE", 5) == 0) 
     {
         init_board();
-        if (bullet_timer > 0) 
+        for (int i = 0; i < 2; i++)
         {
-            bullet_timer--;
-            if (bullet_timer == 0) 
+            if (bullet_timer[i] > 0) 
             {
-                bullet_x = -1;
-                bullet_y = -1;
+                bullet_timer[i]--;
+                if (bullet_timer[i] == 0) 
+                {
+                    bullet_x[i] = -1;
+                    bullet_y[i] = -1;
+                }
+            }
+
+            if (shooter_cooldown_timer[i] > 0) 
+            {
+                shooter_cooldown_timer[i]--;
+                if (shooter_cooldown_timer[i] == 0) players[i+1].gun = 1;
+            }
+        }
+
+        for (int i = 0; i < 4; i++)
+        {
+            if (hit_color_timer[i] > 0) hit_color_timer[i]--;
+
+            if (shield_cooldown_timer[i] > 0)
+            {
+                shield_cooldown_timer[i]--;
+                if (shield_cooldown_timer[i] == 0) players[i+3].shield = 1;
+            }
+
+            if (shields[i].timer > 0)
+            {
+                shields[i].timer--;
+                if (shields[i].timer == 0)
+                {
+                    shields[i].x = -1;
+                    shields[i].y = -1;
+                }
             }
         }
     }
@@ -285,46 +384,43 @@ void process_line(char *line) {
         players[id].y = y;
         players[id].hp = blood;
 
-        if (blood > 0) board[y][x] = id_to_char(id);
         draw_game_screen();
     }
     else if (strncmp(line, "BULLET", 6) == 0) 
     {
         int shooter, hit, x, y, remain;
-        sscanf(line, "BULLET %d %d %d %d %d", &shooter, &hit, &x, &y, &remain);
+        sscanf(line, "BULLET %d %d %d %d %d\n", &shooter, &hit, &x, &y, &remain);
 
-        bullet_x = x;
-        bullet_y = y;
+        players[shooter].gun = 0;
+        shooter_cooldown_timer[shooter - 1] = 25;
+
+        bullet_x[shooter - 1] = x;
+        bullet_y[shooter - 1] = y;
+        bullet_timer[shooter - 1] = 3;
+
         my_bullets = remain;
-        bullet_timer = 3;
         draw_game_screen();
     }
     else if (strncmp(line, "HIT", 3)==0) 
     {
         int shooter, hit, x, y, remain;
-        sscanf(line, "HIT %d %d %d %d %d", &shooter, &hit, &x, &y, &remain);
+        sscanf(line, "HIT %d %d %d %d %d\n", &shooter, &hit, &x, &y, &remain);
+
+        players[shooter].gun = 0;
+        shooter_cooldown_timer[shooter - 1] = 25;
+
+        hit_color_timer[hit - 3] = 4;
 
         my_bullets = remain;
-
-        for (int t = 0; t < 3; t++) 
-        {
-            standend(); 
-            mvaddch(players[hit].y + 2, players[hit].x, ' ');
-            refresh();
-            usleep(80000);
-            standend(); 
-
-            if (players[hit].live) mvaddch(players[hit].y + 2, players[hit].x, players[hit].id);
-            refresh();
-            usleep(80000);
-        }
-
         draw_game_screen();
     }
     else if (strncmp(line, "DIE", 3) == 0)
     {
         int shooter, hit, x, y, remain;
-        sscanf(line, "DIE %d %d %d %d %d", &shooter, &hit, &x, &y, &remain);
+        sscanf(line, "DIE %d %d %d %d %d\n", &shooter, &hit, &x, &y, &remain);
+
+        players[shooter].gun = 0;
+        shooter_cooldown_timer[shooter - 1] = 25;
 
         players[hit].live = 0;
         players[hit].hp = 0;
@@ -344,6 +440,35 @@ void process_line(char *line) {
         }
 
         my_bullets = remain;
+    }
+    else if (strncmp(line, "SHIELD", 6) == 0)
+    {
+        int id, x, y;
+        sscanf(line, "SHIELD %d %d %d\n", &id, &x, &y);
+
+        players[id].shield = 0;
+        shield_cooldown_timer[id-3] = 100;
+
+        shields[id-3].x = x;
+        shields[id-3].y = y;
+        shields[id-3].timer = 25;
+
+        draw_game_screen();
+    }
+    else if (strncmp(line, "SLDBULLET", 9) == 0)
+    {
+        int shooter, hit, x, y, remain;
+        sscanf(line, "SLDBULLET %d %d %d %d %d\n", &shooter, &hit, &x, &y, &remain);
+
+        players[shooter].gun = 0;
+        shooter_cooldown_timer[shooter - 1] = 25;
+
+        bullet_x[shooter - 1] = x;
+        bullet_y[shooter - 1] = y;
+        bullet_timer[shooter - 1] = 3;
+
+        my_bullets = remain;
+        draw_game_screen();
     }
 }
 
@@ -406,12 +531,27 @@ void *input_thread(void *arg) {
         if (ch=='a') send(sockfd, "MOVE L\n", 7, 0);
         if (ch=='d') send(sockfd, "MOVE R\n", 7, 0);
 
-        if (my_id == 1 || my_id == 2)
+        if (my_id >= 3 && my_id <= 6 && ch == '0')
         {
-            if (ch=='i') send(sockfd, "SHOOT U\n", 8, 0);
-            if (ch=='k') send(sockfd, "SHOOT D\n", 8, 0);
-            if (ch=='j') send(sockfd, "SHOOT L\n", 8, 0);
-            if (ch=='l') send(sockfd, "SHOOT R\n", 8, 0);
+            int can_use_shield = 1;
+            for (int i = 0; i < 4; i++)
+            {
+                if (x == shields[i].x && y == shields[i].y)
+                {
+                    can_use_shield = 0;
+                    break;
+                }
+            }
+            
+            if (players[my_id].shield == 1 && can_use_shield == 1) send(sockfd, "SHIELD\n", 6, 0);
+        }
+
+        if ((my_id == 1 && players[1].gun == 1) || (my_id == 2 && players[2].gun == 1))
+        {
+            if (ch=='i') send(sockfd, "SHOOT U 1\n", 9, 0);
+            if (ch=='k') send(sockfd, "SHOOT D 1\n", 9, 0);
+            if (ch=='j') send(sockfd, "SHOOT L 1\n", 9, 0);
+            if (ch=='l') send(sockfd, "SHOOT R 1\n", 9, 0);
         }
     }
     return NULL;
@@ -443,6 +583,10 @@ int main(int argc, char *argv[]) {
     noecho();   // 不會把鍵盤輸入顯示出來
     cbreak();   
     keypad(stdscr, TRUE);   // 可加特殊建
+
+    start_color();
+    init_pair(1, COLOR_RED, COLOR_BLACK);
+    init_pair(2, COLOR_BLACK, COLOR_WHITE);
 
     pthread_t t1, t2;
     pthread_create(&t1, NULL, recv_thread, NULL);
