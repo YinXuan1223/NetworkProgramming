@@ -107,7 +107,7 @@ void init_room(int rid) {
     for (int y = 0; y < MAP_H; y++) {
         for (int x = 0; x < MAP_W; x++){
             rm -> map[y][x].shield = 0;
-            rm -> map[y][x].shield_timer = 25;
+            rm -> map[y][x].shield_timer = 0;
             rm -> map[y][x].has_init_player = 0;
             rm -> map[y][x].shield_by = -1;
         } 
@@ -198,7 +198,7 @@ void handle_shield(char* cmd, Room *rm, PlayerSlot *ps){
 	int sld_x = ps -> x;
 	int sld_y = ps -> y;
 	rm -> map[sld_y][sld_x].shield = 1;
-	rm -> map[sld_y][sld_x].shield_timer = 50;
+	rm -> map[sld_y][sld_x].shield_timer = 25;
     rm -> map[sld_y][sld_x].shield_by = ps->prid;
 	char ev[128];
 	sprintf(ev, "SHIELD %d %d %d\n", ps->prid, sld_x, sld_y);
