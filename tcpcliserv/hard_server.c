@@ -215,13 +215,14 @@ void handle_invite(char* cmd, Room *rm, PlayerSlot *ps){ //cmd 要長 "INVITE (�
 
 void handle_agree(char* cmd, Room *rm, PlayerSlot *ps){ // cmd 要長 "AGREE (被邀請人) agrees (邀請人)"
     if(ps->is_combined) return;
-    int shooter = cmd[6]-'0', mover = cmd[15]-'0';
+    char shooter = cmd[6], mover = cmd[15];
+    int shooter_id = cmd[6]-'0', mover_id = cmd[15]-'0';
 
-    rm->players[shooter].is_combined = 1;
-    rm->players[shooter].can_move = 0;
-    rm->players[shooter].can_shoot = 2;
-    rm->players[mover].is_combined = 1;
-    rm->players[mover].can_shoot = 0;
+    rm->players[shooter_id].is_combined = 1;
+    rm->players[shooter_id].can_move = 0;
+    rm->players[shooter_id].can_shoot = 2;
+    rm->players[mover_id].is_combined = 1;
+    rm->players[mover_id].can_shoot = 0;
     
     char ev[128];
     sprintf(ev, "AGREE %c agrees %c\n", shooter, mover);
@@ -230,7 +231,7 @@ void handle_agree(char* cmd, Room *rm, PlayerSlot *ps){ // cmd 要長 "AGREE (�
 
 void handle_disagree(char* cmd, Room *rm, PlayerSlot *ps){ // cmd 要長 "DISAGREE (被邀請人) disagrees (邀請人)"
     if(ps->is_combined) return;
-    int shooter = cmd[9]-'0', mover = cmd[21]-'0';
+    char shooter = cmd[9], mover = cmd[21];
 
     char ev[128];
     sprintf(ev, "DISAGREE %c disagrees %c\n", shooter, mover);
@@ -290,6 +291,9 @@ void handle_player_cmd(Room *rm, PlayerSlot *ps, const char *line) {
     }
     else if (strncmp(cmd, "AGREE ", 6)==0){ // cmd 要長 "AGREE (被邀請人) agrees (邀請人)"
         handle_agree(cmd, rm, ps);
+    }
+    else if (strncmp(cmd, "DISAGREE ", 9) == 0){
+        handle_disagree(cmd, rm, ps);
     }
     else if (strncmp(cmd, "RESCUE ", 7)==0){
         handle_rescue(cmd, rm, ps);
