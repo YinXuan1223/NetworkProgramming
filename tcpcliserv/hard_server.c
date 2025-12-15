@@ -107,7 +107,7 @@ void init_room(int rid) {
     for (int y = 0; y < MAP_H; y++) {
         for (int x = 0; x < MAP_W; x++){
             rm -> map[y][x].shield = 0;
-            rm -> map[y][x].shield_timer = 25;
+            rm -> map[y][x].shield_timer = 0;
             rm -> map[y][x].has_init_player = 0;
             rm -> map[y][x].shield_by = -1;
         } 
@@ -150,7 +150,10 @@ void shooting(Room *rm, int tx, int ty, PlayerSlot *ps, int is_first){
                 hit_id = other->prid;
                 
                 char ev[128];
-                if(other->blood==0) snprintf(ev, sizeof(ev), "DIE %d %d %d %d %d\n", ps->prid, other->prid, tx, ty, rm->bullet_cnt); // 格式 : 發射的人, 被射中的人, 最後子彈x, 最後子彈y, 剩餘子彈 (有死)
+                if(other->blood==0){
+                    snprintf(ev, sizeof(ev), "DIE %d %d %d %d %d\n", ps->prid, other->prid, tx, ty, rm->bullet_cnt); // 格式 : 發射的人, 被射中的人, 最後子彈x, 最後子彈y, 剩餘子彈 (有死)
+                    ps->blood = 0; ps->extra_blood=0; ps->can_move=0; ps->can_shield=0; ps->is_alive=0; rm->player_cnt--;
+                }
                 else snprintf(ev, sizeof(ev), "HIT %d %d %d %d %d\n", ps->prid, other->prid, tx, ty, rm->bullet_cnt); // 格式 : 發射的人, 被射中的人, 最後子彈x, 最後子彈y, 剩餘子彈 (沒死)
                 broadcast_room(rm, ev);
                 break;
@@ -199,6 +202,7 @@ void handle_shield(char* cmd, Room *rm, PlayerSlot *ps){
 	int sld_y = ps -> y;
 	rm -> map[sld_y][sld_x].shield = 1;
 	rm -> map[sld_y][sld_x].shield_timer = 25;
+    rm -> map[sld_y][sld_x].shield_by = ps->prid;
 	char ev[128];
 	sprintf(ev, "SHIELD %d %d %d\n", ps->prid, sld_x, sld_y);
 	broadcast_room(rm, ev);
@@ -212,8 +216,71 @@ void handle_invite(char* cmd, Room *rm, PlayerSlot *ps){ //cmd 要長 "INVITE (�
     broadcast_room(rm, ev); 
 }
 
-void handle_agree(char* cmd, Room *rm, PlayerSlot *ps){
+void handle_agree(char* cmd, Room *rm, PlayerSlot *ps){ // cmd 要長 "AGREE (被邀請人) agrees (邀請人)"
+    if(ps->is_combined) return;
+    char shooter = cmd[6], mover = cmd[15];
+    int shooter_id = cmd[6]-'0', mover_id = cmd[15]-'0';
+
+    rm->players[shooter_id].is_combined = 1;
+    rm->players[shooter_id].can_move = 0;
+    rm->players[shooter_id].can_shoot = 2;
+    rm->players[mover_id].is_combined = 1;
+    rm->players[mover_id].can_shoot = 0;
     
+    char ev[128];
+    sprintf(ev, "AGREE %c agrees %c\n", shooter, mover);
+    broadcast_room(rm, ev);
+}
+
+void handle_disagree(char* cmd, Room *rm, PlayerSlot *ps){ // cmd 要長 "DISAGREE (被邀請人) disagrees (邀請人)"
+    if(ps->is_combined) return;
+    char shooter = cmd[9], mover = cmd[21];
+
+    char ev[128];
+    sprintf(ev, "DISAGREE %c disagrees %c\n", shooter, mover);
+    broadcast_room(rm, ev);
+}
+
+void handle_split(char* cmd, Room *rm, PlayerSlot *ps){ // cmd 要長 "SPLIT (某人) splits (某人)"
+    if(ps->is_combined) return;
+    int somebody1 = cmd[6]-'0', somebody2 = cmd[15]-'0';
+
+    int shooter, mover;
+    if(rm->players[somebody1].can_shoot==2){
+        shooter = somebody1;
+        mover = somebody2;
+    }
+    else{
+        shooter = somebody2;
+        mover = somebody1;
+    }
+    
+    rm->players[shooter].x = rm->players[mover].x;
+    rm->players[shooter].y = rm->players[mover].y;
+    rm->players[shooter].is_combined = 0;
+    rm->players[shooter].can_move = 1;
+    rm->players[shooter].can_shoot = 1;
+
+    rm->players[mover].is_combined = 0;
+    rm->players[mover].can_move = 1;
+    rm->players[mover].can_shoot = 1;
+    
+    char ev[128];
+    sprintf(ev, "SPLIT %c splits %c\n", shooter, mover);
+    broadcast_room(rm, ev);
+}
+
+void handle_rescue(char* cmd, Room *rm, PlayerSlot *ps){  // "RESCUE (補血的人) rescues (被補血的人)"
+    if(!ps->extra_blood) return;
+    char helper = cmd[7], helped = cmd[17];
+    int helper_id = cmd[6]-'0', helped_id = cmd[15]-'0';
+
+    rm->players[helper_id].extra_blood--;
+    rm->players[helped_id].blood++;
+    
+    char ev[128];
+    sprintf(ev, "RESCUE %c rescues %c\n", helper, helped);
+    broadcast_room(rm, ev);
 }
 
 
@@ -238,9 +305,16 @@ void handle_player_cmd(Room *rm, PlayerSlot *ps, const char *line) {
     else if (strncmp(cmd, "AGREE ", 6)==0){ // cmd 要長 "AGREE (被邀請人) agrees (邀請人)"
         handle_agree(cmd, rm, ps);
     }
+    else if (strncmp(cmd, "DISAGREE ", 9) == 0){ 
+        handle_disagree(cmd, rm, ps);
+    }
+    else if (strncmp(cmd, "RESCUE ", 7)==0){  // cmd 要長 "RESCUE (補血的人) rescues (被補血的人)"
+        handle_rescue(cmd, rm, ps);
+    }
 	else if (strncmp(cmd, "QUIT",4)==0) {
         ps->is_alive = 0;
         ps->is_ingame = 0;
+        rm->players[ps->prid].fd = -1;
         ps->fd = -1;
         rm->player_cnt--;
         char ev[128];
@@ -248,6 +322,16 @@ void handle_player_cmd(Room *rm, PlayerSlot *ps, const char *line) {
         broadcast_room(rm, ev);
         close(ps->fd);
     }
+    else if (strncmp(cmd, "DIEKEEP ", 8)==0) { // stay 就不用理他
+        rm->players[ps->prid].fd = -1;
+        ps->is_ingame = 0;
+        enqueue_relogin(ps->fd);
+    } 
+    else if (strncmp(cmd, "DIELEAVE ", 9)==0) {
+        rm->players[ps->prid].fd = -1;
+        ps->is_ingame = 0;
+        close(ps->fd);
+    } 
 }
 
 void update_state(int tick, Room* rm){
@@ -389,8 +473,12 @@ void *game_loop(void *arg) {
                     }
                 } 
                 else if (n == 0) { // player 按 control C 關掉連線 (要更新 players 狀態，通知其他人)
+                    printf("Player %d left\n", rm->players[i].prid);
                     rm -> players[i].is_alive = 0;
                     rm -> players[i].is_ingame = 0;
+                    char ev[128];
+                    snprintf(ev, sizeof(ev), "PLAYER_LEFT %d\n", rm -> players[i].prid);
+                    broadcast_room(rm, ev);
                     close(fd);
                     rm->players[i].fd = -1;
                     rm->player_cnt--;
@@ -426,10 +514,10 @@ void *game_loop(void *arg) {
             int n = recv(fd, buf, sizeof(buf)-1, MSG_DONTWAIT);
             if (n > 0) {
                 buf[n] = 0;
-                if (strstr(buf, "KEEP")) {
+                if (strncmp(buf, "KEEP ", 5)==0) {
                     enqueue_relogin(rm->players[i].fd);
                 } 
-                else if (strstr(buf, "LEAVE")) {
+                else if (strncmp(buf, "LEAVE ", 6)==0) {
                     close(rm->players[i].fd);
                 } 
                 else continue;
