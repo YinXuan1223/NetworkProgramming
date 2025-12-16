@@ -543,6 +543,7 @@ void process_line(char *line) {
         {
             invite = 1;
             mvprintw(20, 0, "Your partner is inviting you to combine.");
+            // mvprintw(19, 0, "Your partner is inviting you to combine.");
             refresh();
         }
         if ((my_id == 1 && line[7] == '1') || (my_id == 2 && line[7] == '2'))
@@ -564,7 +565,7 @@ void process_line(char *line) {
         }
     }*/
     else if (strncmp(line, "DISAGREE", 8) == 0)
-    {
+    {   
         int a, b;
         sscanf(line, "DISAGREE %d disagrees %d", &a, &b);
 
@@ -572,21 +573,26 @@ void process_line(char *line) {
 
         if (my_id == a)
         {
-            mvprintw(20, 0, "                                        ");
+            // mvprintw(20, 0, "                                        ");
+            mvprintw(20, 0, "You declined your partner's invitation.");
+            refresh();
+            usleep(8000000);
+
+            mvprintw(20, 0, "                                            ");
             refresh();
         }
 
         if (my_id == b)
         {
             mvprintw(19, 0, "                                         ");
-            refresh();
+            // refresh();
 
             attron(COLOR_PAIR(2));
             mvprintw(20, 0, "Your partner disagrees with your invitation.");
             refresh();
             attroff(COLOR_PAIR(2));
 
-            usleep(2000000);
+            usleep(8000000);
 
             mvprintw(20, 0, "                                            ");
             refresh();

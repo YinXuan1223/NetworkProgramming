@@ -1,7 +1,7 @@
 #include	"unp.h"
 
 #define     MAXROOM 10
-#define		MAXPLAYER 6
+#define		MAXPLAYER 3
 #define     MAP_W 20
 #define     MAP_H 12
 #define     RELOGIN_Q_SIZE 1024
@@ -235,9 +235,10 @@ void handle_agree(char* cmd, Room *rm, PlayerSlot *ps){ // cmd 要長 "AGREE (�
 void handle_disagree(char* cmd, Room *rm, PlayerSlot *ps){ // cmd 要長 "DISAGREE (被邀請人) disagrees (邀請人)"
     if(ps->is_combined) return;
     char shooter = cmd[9], mover = cmd[21];
-
+    
     char ev[128];
     sprintf(ev, "DISAGREE %c disagrees %c\n", shooter, mover);
+    printf("%s", ev);
     broadcast_room(rm, ev);
 }
 
@@ -398,7 +399,7 @@ void control_timer(Room* rm){
     }
 
     // 對 shield 的檢查 (只看人)
-    for(int i=3 ; i<=6 ; i++){
+    for(int i=3 ; i<=MAXPLAYER ; i++){
         if(rm->players[i].can_shield) continue;
     
         rm->players[i].shield_cdtimer--;
