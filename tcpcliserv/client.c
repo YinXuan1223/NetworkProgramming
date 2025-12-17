@@ -10,6 +10,8 @@ int game_started = 0;
 
 char board[MAP_H][MAP_W+1];
 
+
+int global_timer = 300;
 int my_id;
 char my_team[16] = "Unknown";
 int my_hp = 2;
@@ -27,6 +29,9 @@ int shooter_cooldown_timer[2] = {0, 0};
 
 int hit_color_timer[4] = {0, 0, 0, 0};
 int shield_cooldown_timer[4] = {0, 0, 0, 0};
+
+int hint_timer = 0; //  5 seconds (25)
+int hint_pid = 0;
 
 struct Shield
 {
@@ -83,6 +88,8 @@ char id_to_char(int id){
     }
     return c;
 }
+
+
 
 void init_board()
 {
@@ -202,13 +209,13 @@ void draw_private_status()
     int start_y = 2 + MAP_H + 1;
     if (strncmp(my_team, "human", 5) == 0)
     {
-        mvprintw(start_y, 0, "TIME: Waiting...      HP: %d", my_hp);
+        mvprintw(start_y, 0,     "TIME: %d      HP: %d", global_timer, my_hp);
         mvprintw(start_y + 1, 0, "TEAM: Human           Blood Bag: %d", blood_bag);
         mvprintw(start_y + 2, 0, "ID: %c                 Shield Usability: %s", id_to_char(my_id), (shield == 1 ? "Yes" : "No "));
     }
     else if (strncmp(my_team, "ghost", 5) == 0)
     {
-        mvprintw(start_y, 0, "TIME: Waiting...      Bullet: %d ", my_bullets);
+        mvprintw(start_y, 0,     "TIME: %d      Bullet: %d ", global_timer, my_bullets);
         mvprintw(start_y + 1, 0, "TEAM: Ghost           Combining: %s", (combine == 1 ? "Yes" : "No "));
         mvprintw(start_y + 2, 0, "ID: %c                 Gun Usability: %s", id_to_char(my_id), (gun == 1 ? "Yes" : "No "));
     }
@@ -277,7 +284,10 @@ void draw_start_screen()
 }
 
 void draw_public_status()
-{
+{   
+    if(hint_timer > 0) mvprintw(1, 0, "%c left the game...", id_to_char(hint_pid));
+    else mvprintw(1, 0, "                                                       ");
+
     int start_x = MAP_W + 3;
 
     mvprintw(2, start_x, "Ghost");
@@ -286,7 +296,7 @@ void draw_public_status()
     for (int i = 1; i <= 2; i++)
     {
         if (players[i].live == 1) mvprintw(3 + i, start_x, "%c %s", players[i].id, (players[i].gun == 1 ? "G" : " "));
-        else mvprintw(3 + i, start_x, "%c DEAD        ", players[i].id);
+        else mvprintw(3 + i, start_x, "%c DEAD        ", players[i].id); 
     }
 
     mvprintw(7, start_x, "Human");
@@ -312,7 +322,7 @@ void draw_public_status()
 
 void draw_game_screen()
 {
-    mvprintw(0, 0, "Game Running...             ");
+    mvprintw(0, 0, "New Game Running...             ");
     draw_board();
     draw_public_status();
     draw_private_status();
@@ -351,7 +361,7 @@ void process_line(char *line) {
         draw_waiting_screen();
     }
     else if (strncmp(line, "GAME_START", 10) == 0) 
-    {
+    {   
         start_set();
         draw_game_screen();
         draw_start_screen();
@@ -361,6 +371,8 @@ void process_line(char *line) {
     {
         int id;
         sscanf(line, "PLAYER_LEFT %d\n", &id);
+        hint_timer = 15;
+        hint_pid = id;
         players[id].live = 0;
         players[id].hp = 0;
         players[id].shield = 0;
@@ -381,7 +393,9 @@ void process_line(char *line) {
         draw_game_screen();
     }
     else if (strncmp(line, "STATE", 5) == 0) 
-    {
+    {   
+        if(hint_timer) hint_timer--;
+
         init_board();
         for (int i = 0; i < 2; i++)
         {
@@ -430,6 +444,7 @@ void process_line(char *line) {
                 }
             }
         }
+
     }
     else if (line[0] == 'P') 
     {
@@ -555,65 +570,38 @@ void process_line(char *line) {
         attroff(COLOR_PAIR(2));
         refresh();
     }
-    /*else if (strncmp(line, "AGREE", 5) == 0)
-    {
-        if (my_id == 1 || my_id == 2)
-        {
-            invite = 0;
-            combine = 1;
-            players[my_id].combine = 1;
-        }
-    }*/
-    else if (strncmp(line, "DISAGREE", 8) == 0)
-    {   
-        int a, b;
-        sscanf(line, "DISAGREE %d disagrees %d", &a, &b);
-
-        if (my_id == 1 || my_id == 2) invite = 0;
-
-        if (my_id == a)
-        {
-            // mvprintw(20, 0, "                                        ");
-            mvprintw(20, 0, "You declined your partner's invitation.");
-            refresh();
-            usleep(8000000);
-
-            mvprintw(20, 0, "                                            ");
-            refresh();
-        }
-
-        if (my_id == b)
-        {
-            mvprintw(19, 0, "                                         ");
-            // refresh();
-
-            attron(COLOR_PAIR(2));
-            mvprintw(20, 0, "Your partner disagrees with your invitation.");
-            refresh();
-            attroff(COLOR_PAIR(2));
-
-            usleep(8000000);
-
-            mvprintw(20, 0, "                                            ");
-            refresh();
-        }
+    else if (strncmp(line, "Game Over! ", 11) == 0){
+        clear();
+        mvprintw(0, 0, "%s", line);
+        mvprintw(2, 0, "Press 'q' to leave the game.");
+        mvprintw(3, 0, "Press 'e' to play again.");
     }
 }
+
 
 
 void *recv_thread(void *arg) {
     static char buf[MAXLINE];
-
+    time_t last_tick = time(NULL);
     while (1) {
     
         if(Readline(sockfd, buf, MAXLINE)<0){
             err_quit("str_cli: server terminated prematurely");
+            exit(0);
+            return NULL;
         }
         process_line(buf);
+
+        time_t now = time(NULL);
+        if (game_started && now - last_tick >= 1) {
+            global_timer--;
+            last_tick = now;
+        }
         
     }
     return NULL;
 }
+
 
 
 void *input_thread(void *arg) {
@@ -703,6 +691,9 @@ void *input_thread(void *arg) {
     return NULL;
 }
 
+
+
+
 int main(int argc, char *argv[]) {
 
     
@@ -738,8 +729,10 @@ int main(int argc, char *argv[]) {
     pthread_create(&t1, NULL, recv_thread, NULL);
     pthread_create(&t2, NULL, input_thread, NULL);
 
+
     pthread_join(t1, NULL);
     pthread_join(t2, NULL);
+
 
     endwin();
     return 0;

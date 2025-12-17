@@ -1,7 +1,7 @@
 #include	"unp.h"
 
 #define     MAXROOM 10
-#define		MAXPLAYER 3
+#define		MAXPLAYER 6
 #define     MAP_W 20
 #define     MAP_H 12
 #define     RELOGIN_Q_SIZE 1024
@@ -152,7 +152,7 @@ void shooting(Room *rm, int tx, int ty, PlayerSlot *ps, int is_first){
                 char ev[128];
                 if(other->blood==0){
                     snprintf(ev, sizeof(ev), "DIE %d %d %d %d %d\n", ps->prid, other->prid, tx, ty, rm->bullet_cnt); // 格式 : 發射的人, 被射中的人, 最後子彈x, 最後子彈y, 剩餘子彈 (有死)
-                    ps->blood = 0; ps->extra_blood=0; ps->can_move=0; ps->can_shield=0; ps->is_alive=0; rm->player_cnt--;
+                    other->blood = 0; other->extra_blood=0; other->can_move=0; other->can_shield=0; other->is_alive=0; rm->player_cnt--;
                 }
                 else snprintf(ev, sizeof(ev), "HIT %d %d %d %d %d\n", ps->prid, other->prid, tx, ty, rm->bullet_cnt); // 格式 : 發射的人, 被射中的人, 最後子彈x, 最後子彈y, 剩餘子彈 (沒死)
                 broadcast_room(rm, ev);
@@ -358,6 +358,7 @@ int check_game_state(Room* rm){
 
     if(rm->global_timer<=0 && human_cnt){ 
         sprintf(ev, "Game Over! Human Win!\n");
+        printf("%s", ev);
         broadcast_room(rm, ev);
         return 1;
     }
@@ -365,6 +366,7 @@ int check_game_state(Room* rm){
     if(human_cnt==0 || rm->bullet_cnt==0){
         if(human_cnt==0) sprintf(ev, "Game Over! Ghosts Win!\n");
         else if(rm->bullet_cnt==0) sprintf(ev, "Game Over! Human Win!\n");
+        printf("%s", ev);
         broadcast_room(rm, ev);
         return 1;
     }
@@ -590,10 +592,10 @@ void assign_client_to_room(int clientfd) {
 			printf("%s", welcome);
             Write(clientfd, welcome, strlen(welcome));
 
-            // 廣播有新成員加入
-            char joinmsg[128];
-            snprintf(joinmsg, sizeof(joinmsg), "New player %d just joined! Now we have %d members.\n", rm->players[idx].prid, rm->player_cnt); // 這些資訊可以簡單， client 那邊可以進一步拆解、重組
-            broadcast_room(rm, joinmsg);
+            // // 廣播有新成員加入 沒有預期到郁淇不需要
+            // char joinmsg[128];
+            // snprintf(joinmsg, sizeof(joinmsg), "New player %d just joined! Now we have %d members.\n", rm->players[idx].prid, rm->player_cnt); // 這些資訊可以簡單， client 那邊可以進一步拆解、重組
+            // broadcast_room(rm, joinmsg);
 
             if (rm->player_cnt == MAXPLAYER) {
                 start_room(rm);
