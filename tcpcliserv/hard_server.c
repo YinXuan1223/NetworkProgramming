@@ -352,11 +352,15 @@ int check_game_state(Room* rm){
 
     char ev[128];
     int human_cnt = 0;
+    int ghost_cnt = 0;
     for(int i=1 ; i<=MAXPLAYER ; i++){
         if(rm->players[i].role==1 && rm->players[i].is_alive) human_cnt++;
+        if(rm->players[i].role==0 && rm->players[i].is_alive) ghost_cnt++;
     }
 
-    if(rm->global_timer<=0 && human_cnt){ 
+
+
+    if((rm->global_timer<=0 && human_cnt) || (rm->global_timer > 0 && human_cnt && !ghost_cnt)){ 
         sprintf(ev, "Game Over! Human Win!\n");
         printf("%s", ev);
         broadcast_room(rm, ev);
@@ -511,25 +515,34 @@ void *game_loop(void *arg) {
 
         char buf[256];
         for (int i = 1; i <= MAXPLAYER; i++) {
-            if (!rm->players[i].is_ingame) continue;
+            printf("asking player %d\n", i);
+            if (!rm->players[i].is_ingame) {
+                printf("player %d is not in game\n", i);
+                continue;
+            }
 
             int fd = rm->players[i].fd;
+            printf("the fd of player %d is %d\n", i, fd);
             int n = recv(fd, buf, sizeof(buf)-1, MSG_DONTWAIT);
             if (n > 0) {
                 buf[n] = 0;
                 if (strncmp(buf, "KEEP ", 5)==0) {
+                    printf("keep! fd: %d", rm->players[i].fd);
                     enqueue_relogin(rm->players[i].fd);
+                    rm->player_cnt--;
                 } 
-                else if (strncmp(buf, "LEAVE ", 6)==0) {
+                else if (strncmp(buf, "PLAYER_LEFT", 11)==0) {
                     close(rm->players[i].fd);
+                    rm->player_cnt--;
                 } 
                 else continue;
                 
             } 
             else if (n == 0) {
+                rm->player_cnt--;
                 close(rm->players[i].fd);
             }
-            rm->player_cnt--;
+            
         }
     }
    

@@ -575,6 +575,7 @@ void process_line(char *line) {
         mvprintw(0, 0, "%s", line);
         mvprintw(2, 0, "Press 'q' to leave the game.");
         mvprintw(3, 0, "Press 'e' to play again.");
+        refresh();
     }
 }
 
@@ -687,6 +688,10 @@ void *input_thread(void *arg) {
             if (ch == 'y') send(sockfd, "AGREE 2 agrees 1\n", 16, 0);
             if (ch == 'n') send(sockfd, "DISAGREE 2 disagrees 1\n", 22, 0);
         }
+
+
+
+        if (ch=='e') send(sockfd, "KEEP \n", 5, 0);
     }
     return NULL;
 }
