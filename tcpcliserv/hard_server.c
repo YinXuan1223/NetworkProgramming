@@ -1,7 +1,7 @@
 #include	"unp.h"
 
 #define     MAXROOM 10
-#define		MAXPLAYER 6
+#define		MAXPLAYER 3
 #define     MAP_W 20
 #define     MAP_H 12
 #define     RELOGIN_Q_SIZE 1024
@@ -511,40 +511,60 @@ void *game_loop(void *arg) {
 
     }
 
+
     while(rm->player_cnt){ // 處理要不要繼續遊戲
+        // printf("asking to leave or stay\n");
+        maxfd = 0;
+        FD_ZERO(&readfds);
 
-        char buf[256];
-        for (int i = 1; i <= MAXPLAYER; i++) {
-            printf("asking player %d\n", i);
-            if (!rm->players[i].is_ingame) {
-                printf("player %d is not in game\n", i);
-                continue;
-            }
-
-            int fd = rm->players[i].fd;
-            printf("the fd of player %d is %d\n", i, fd);
-            int n = recv(fd, buf, sizeof(buf)-1, MSG_DONTWAIT);
-            if (n > 0) {
-                buf[n] = 0;
-                if (strncmp(buf, "KEEP ", 5)==0) {
-                    printf("keep! fd: %d", rm->players[i].fd);
-                    enqueue_relogin(rm->players[i].fd);
-                    rm->player_cnt--;
-                } 
-                else if (strncmp(buf, "PLAYER_LEFT", 11)==0) {
-                    close(rm->players[i].fd);
-                    rm->player_cnt--;
-                } 
-                else continue;
-                
-            } 
-            else if (n == 0) {
-                rm->player_cnt--;
-                close(rm->players[i].fd);
-            }
-            
+        for(int i=1; i<=MAXPLAYER ; i++){
+            if(!rm->players[i].is_ingame) continue;
+            // printf("player %d is still in game\n", i);
+            FD_SET(rm->players[i].fd, &readfds);
+            if(rm->players[i].fd > maxfd) maxfd = rm->players[i].fd;
         }
+
+        tv.tv_sec = 0;
+        tv.tv_usec = 200 * 1000; // 等同 TICK_MS = 200ms
+
+        // 等待可讀事件或 timeout
+        int ready = select(maxfd + 1, &readfds, NULL, NULL, &tv);
+
+        if (ready < 0) {
+            perror("select error");
+            break;
+        }
+
+        // printf("ready = %d", ready);
+        for(int i=1 ; i<=MAXPLAYER ; i++){
+            if(!rm->players[i].is_ingame) continue;
+            int fd = rm->players[i].fd;
+
+            if(FD_ISSET(fd, &readfds)){
+                int n = recv(fd, buf, sizeof(buf)-1, 0);
+                if(n > 0){
+                    buf[n] = 0;
+                    if (strncmp(buf, "KEEP ", 4)==0) {
+                        printf("keep! fd: %d", rm->players[i].fd);
+                        enqueue_relogin(rm->players[i].fd);
+                        rm->players[i].is_ingame=0;
+                        rm->player_cnt--;
+                    } 
+                    else if (strncmp(buf, "PLAYER_LEFT", 11)==0) {
+                        printf("left! fd: %d", rm->players[i].fd);
+                        rm->players[i].is_ingame=0;
+                        close(rm->players[i].fd);
+                        rm->player_cnt--;
+                    } 
+                    else continue;
+                }
+            }
+        }
+
+
     }
+
+    
    
     init_room(rm->rid);
     
@@ -575,6 +595,8 @@ void assign_client_to_room(int clientfd) {
         if (rm->status == 0 && rm->player_cnt < MAXPLAYER) { //status: 0 waiting, 1 running
             
 			int idx = rm->player_cnt+1;
+            printf("in assign client to room , fd: %d, idx: %d\n", clientfd, idx);
+            printf("player cnt1: %d\n",rm->player_cnt);
             rm->players[idx].fd = clientfd;
             rm->players[idx].prid = idx; // 從 1 開始
             rm->players[idx].pgid = global_player_id++;
@@ -585,7 +607,7 @@ void assign_client_to_room(int clientfd) {
 			rm->players[idx].blood = 2;
 			rm->players[idx].extra_blood = 1;
 
-            rm->players[idx].can_shoot = (idx==1 || idx==2) ? 0 : 1;
+            rm->players[idx].can_shoot = (idx==1 || idx==2) ? 1 : 0;
             rm->players[idx].can_move = 1;
             rm->players[idx].can_shield = 1;
 
@@ -596,7 +618,7 @@ void assign_client_to_room(int clientfd) {
             rm->players[idx].is_alive = 1;
             rm->players[idx].is_ingame = 1;
             rm->player_cnt++;
-
+            printf("player cnt2: %d\n",rm->player_cnt);
             // 個別針對 clientfd 送歡迎資訊
             char welcome[256];
             snprintf(welcome, sizeof(welcome),
@@ -604,11 +626,6 @@ void assign_client_to_room(int clientfd) {
 				rm->rid, rm->players[idx].prid, (rm->players[idx].role==0)?"ghost":"human");
 			printf("%s", welcome);
             Write(clientfd, welcome, strlen(welcome));
-
-            // // 廣播有新成員加入 沒有預期到郁淇不需要
-            // char joinmsg[128];
-            // snprintf(joinmsg, sizeof(joinmsg), "New player %d just joined! Now we have %d members.\n", rm->players[idx].prid, rm->player_cnt); // 這些資訊可以簡單， client 那邊可以進一步拆解、重組
-            // broadcast_room(rm, joinmsg);
 
             if (rm->player_cnt == MAXPLAYER) {
                 start_room(rm);
@@ -649,25 +666,30 @@ int main(int argc, char **argv){
 	Listen(listenfd, LISTENQ);
 	printf("Multi-room server listening on %d\n", SERV_PORT);
 
-	for ( ; ; ) {
+	
+    fd_set rset;
+    struct timeval tv;
+    while (1) {
+        FD_ZERO(&rset);
+        FD_SET(listenfd, &rset);
+        int maxfd = listenfd;
 
-        connfd = dequeue_relogin();
-        if(connfd >= 0){
+        tv.tv_sec = 0;
+        tv.tv_usec = 200 * 1000;
+
+        select(maxfd + 1, &rset, NULL, NULL, &tv);
+
+        if (FD_ISSET(listenfd, &rset)) {
+            connfd = accept(listenfd, (SA *) &cliaddr, &clilen);
             assign_client_to_room(connfd);
-            continue;
         }
 
+        while ((connfd = dequeue_relogin()) >= 0) {
+            printf("we have an old friend, fd =  %d\n", connfd);
+            assign_client_to_room(connfd);
+        }
+    }
 
-		clilen = sizeof(cliaddr);
-		if ( (connfd = accept(listenfd, (SA *) &cliaddr, &clilen)) < 0) {
-			if (errno == EINTR) continue;		
-			else err_sys("accept error");
-		}
-
-		set_nonblock(connfd);
-		printf("Accept connfd: %d\n", connfd);
-		assign_client_to_room(connfd);
-	}
 
 	close(listenfd);
 	return 0;

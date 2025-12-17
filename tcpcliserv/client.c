@@ -12,6 +12,7 @@ char board[MAP_H][MAP_W+1];
 
 
 int global_timer = 300;
+int room;
 int my_id;
 char my_team[16] = "Unknown";
 int my_hp = 2;
@@ -167,7 +168,7 @@ void draw_board()
 void draw_waiting_screen()
 {
     clear();
-    mvprintw(0, 0, "Waiting for other players...");
+    mvprintw(0, 0, "In room %d, Waiting for other players...", room);
     init_board();
     draw_board();
 
@@ -333,7 +334,7 @@ void draw_game_screen()
 void process_line(char *line) {
     if (strncmp(line, "WELCOME", 7) == 0) 
     {   
-        int room, id;
+        int id;
         char team[16];
         sscanf(line, "WELCOME! Your information: Room %d, ID %d, Team %s. Waiting for others to join...\n", &room, &id, team);
         
@@ -614,6 +615,9 @@ void *input_thread(void *arg) {
             endwin();
             exit(0);
         }
+        if (ch=='e') {
+            send(sockfd, "KEEP\n", 5, 0);
+        }
         if (!game_started) continue;
 
 
@@ -691,7 +695,7 @@ void *input_thread(void *arg) {
 
 
 
-        if (ch=='e') send(sockfd, "KEEP \n", 5, 0);
+        
     }
     return NULL;
 }
