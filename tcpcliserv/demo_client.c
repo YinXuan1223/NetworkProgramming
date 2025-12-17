@@ -10,9 +10,8 @@ int game_started = 0;
 
 char board[MAP_H][MAP_W+1];
 
-
 int global_timer = 300;
-int room;
+//int room;
 int my_id;
 char my_team[16] = "Unknown";
 int my_hp = 2;
@@ -21,18 +20,22 @@ int shield = 1; //1:can use 0:can't use
 int blood_bag = 1;
 int gun = 1; //1:can use 0:can't use
 int invite = 0;
-int combine = 0; //1::combining
+int invited = 0;
+int combine = 0; //1:combining
+int is_shooter = 0;
+int is_mover = 0;
+
+int hint_timer = 0;
+int hint_pid = 0;
 
 int bullet_x[2] = {-1, -1};
 int bullet_y[2] = {-1, -1};
 int bullet_timer[2] = {0, 0};
 int shooter_cooldown_timer[2] = {0, 0};
+int disagree_msg_timer[2] = {0, 0};
 
 int hit_color_timer[4] = {0, 0, 0, 0};
 int shield_cooldown_timer[4] = {0, 0, 0, 0};
-
-int hint_timer = 0; //  5 seconds (25)
-int hint_pid = 0;
 
 struct Shield
 {
@@ -52,7 +55,7 @@ struct Player
     int blood_bag;
     int shield; //1:can use 0:can't use
     int gun; //1:can use 0:can't use
-    int combine; //1::combining
+    int combine; //1:combining
     int control; //1:control combine players
 };
 
@@ -90,8 +93,6 @@ char id_to_char(int id){
     return c;
 }
 
-
-
 void init_board()
 {
     for (int y = 0; y < MAP_H; y++)
@@ -104,11 +105,11 @@ void init_board()
     }
 }
 
-void draw_board() 
+void draw_board()
 {
-    for (int y = 0; y < MAP_H; y++) 
+    for (int y = 0; y < MAP_H; y++)
     {
-        for (int x = 0; x < MAP_W; x++) 
+        for (int x = 0; x < MAP_W; x++)
         {
             int is_shield = 0;
             for (int i = 0; i < 4; i++)
@@ -139,7 +140,10 @@ void draw_board()
                         }
                     }
 
-                    mvaddch(y + 2, x, players[i].id);
+                    char ch = players[i].id;
+                    if ((i == 1 || i == 2) && players[i].combine == 1) ch = 'G';
+
+                    mvaddch(y + 2, x, ch);
                     if (red == 1) attroff(COLOR_PAIR(1));
 
                     drawn = 1;
@@ -152,7 +156,7 @@ void draw_board()
                 char ch = '.';
                 for (int i = 0; i < 2; i++)
                 {
-                    if (x == bullet_x[i] && y == bullet_y[i] && (x != players[1].x || y != players[1].y) && (x != players[2].x || y != players[2].y)) 
+                    if (x == bullet_x[i] && y == bullet_y[i] && (x != players[1].x || y != players[1].y) && (x != players[2].x || y != players[2].y))
                     {
                         ch = '*';
                         break;
@@ -168,7 +172,7 @@ void draw_board()
 void draw_waiting_screen()
 {
     clear();
-    mvprintw(0, 0, "In room %d, Waiting for other players...", room);
+    mvprintw(0, 0, "Waiting for other players...");
     init_board();
     draw_board();
 
@@ -194,6 +198,7 @@ void draw_waiting_screen()
         mvprintw(start_y + 10, 0, "Press 'h' to invite your partner to combine.");
         mvprintw(start_y + 11, 0, "Press 'y' to agree the invitation.");
         mvprintw(start_y + 12, 0, "Press 'n' to disagree the invitation.");
+        mvprintw(start_y + 13, 0, "Press 'g' to split.");
     }
     else if (my_id >= 3 && my_id <= 6)
     {
@@ -209,18 +214,20 @@ void draw_private_status()
 {
     int start_y = 2 + MAP_H + 1;
     if (strncmp(my_team, "human", 5) == 0)
-    {
-        mvprintw(start_y, 0,     "TIME: %d      HP: %d", global_timer, my_hp);
+    {   
+        mvprintw(start_y, 0,     "                                             ");
+        mvprintw(start_y, 0,     "TIME: %d             HP: %d", global_timer, my_hp);
         mvprintw(start_y + 1, 0, "TEAM: Human           Blood Bag: %d", blood_bag);
         mvprintw(start_y + 2, 0, "ID: %c                 Shield Usability: %s", id_to_char(my_id), (shield == 1 ? "Yes" : "No "));
     }
     else if (strncmp(my_team, "ghost", 5) == 0)
     {
-        mvprintw(start_y, 0,     "TIME: %d      Bullet: %d ", global_timer, my_bullets);
+        mvprintw(start_y, 0,     "                                             ");
+        mvprintw(start_y, 0,     "TIME: %d             Bullet: %d ", global_timer, my_bullets);
         mvprintw(start_y + 1, 0, "TEAM: Ghost           Combining: %s", (combine == 1 ? "Yes" : "No "));
         mvprintw(start_y + 2, 0, "ID: %c                 Gun Usability: %s", id_to_char(my_id), (gun == 1 ? "Yes" : "No "));
     }
-    
+   
     mvprintw(start_y + 7, 0, "Press 'q' to quit.");
 
     if (my_id == 1 || my_id == 2)
@@ -229,6 +236,7 @@ void draw_private_status()
         mvprintw(start_y + 10, 0, "Press 'h' to invite your partner to combine.");
         mvprintw(start_y + 11, 0, "Press 'y' to agree the invitation.");
         mvprintw(start_y + 12, 0, "Press 'n' to disagree the invitation.");
+        mvprintw(start_y + 13, 0, "Press 'g' to split.");
     }
     else if (my_id >= 3 && my_id <= 6)
     {
@@ -285,7 +293,7 @@ void draw_start_screen()
 }
 
 void draw_public_status()
-{   
+{
     if(hint_timer > 0) mvprintw(1, 0, "%c left the game...", id_to_char(hint_pid));
     else mvprintw(1, 0, "                                                       ");
 
@@ -296,8 +304,8 @@ void draw_public_status()
 
     for (int i = 1; i <= 2; i++)
     {
-        if (players[i].live == 1) mvprintw(3 + i, start_x, "%c %s", players[i].id, (players[i].gun == 1 ? "G" : " "));
-        else mvprintw(3 + i, start_x, "%c DEAD        ", players[i].id); 
+        if (players[i].live == 1) mvprintw(3 + i, start_x, "%c %s", players[i].id, (players[i].gun == 1 ? "G" : (players[i].control == 1 ? "C" : " ")));
+        else mvprintw(3 + i, start_x, "%c DEAD        ", players[i].id);
     }
 
     mvprintw(7, start_x, "Human");
@@ -323,7 +331,7 @@ void draw_public_status()
 
 void draw_game_screen()
 {
-    mvprintw(0, 0, "New Game Running...             ");
+    mvprintw(0, 0, "Game Running...             ");
     draw_board();
     draw_public_status();
     draw_private_status();
@@ -332,12 +340,12 @@ void draw_game_screen()
 
 /* process a complete received line */
 void process_line(char *line) {
-    if (strncmp(line, "WELCOME", 7) == 0) 
-    {   
-        int id;
+    if (strncmp(line, "WELCOME", 7) == 0)
+    {  
+        int room, id;
         char team[16];
         sscanf(line, "WELCOME! Your information: Room %d, ID %d, Team %s. Waiting for others to join...\n", &room, &id, team);
-        
+       
         my_id = id;
         strcpy(my_team, team);
 
@@ -361,14 +369,14 @@ void process_line(char *line) {
 
         draw_waiting_screen();
     }
-    else if (strncmp(line, "GAME_START", 10) == 0) 
-    {   
+    else if (strncmp(line, "GAME_START", 10) == 0)
+    {
         start_set();
         draw_game_screen();
         draw_start_screen();
         game_started = 1;
     }
-    else if (strncmp(line, "PLAYER_LEFT", 11) == 0) 
+    else if (strncmp(line, "PLAYER_LEFT", 11) == 0)
     {
         int id;
         sscanf(line, "PLAYER_LEFT %d\n", &id);
@@ -393,30 +401,45 @@ void process_line(char *line) {
 
         draw_game_screen();
     }
-    else if (strncmp(line, "STATE", 5) == 0) 
-    {   
+    else if (strncmp(line, "STATE", 5) == 0)
+    {
         if(hint_timer) hint_timer--;
 
         init_board();
         for (int i = 0; i < 2; i++)
         {
-            if (bullet_timer[i] > 0) 
+            if (bullet_timer[i] > 0)
             {
                 bullet_timer[i]--;
-                if (bullet_timer[i] == 0) 
+                if (bullet_timer[i] == 0)
                 {
                     bullet_x[i] = -1;
                     bullet_y[i] = -1;
                 }
             }
 
-            if (shooter_cooldown_timer[i] > 0) 
+            if (shooter_cooldown_timer[i] > 0)
             {
                 shooter_cooldown_timer[i]--;
-                if (shooter_cooldown_timer[i] == 0) 
+                if (shooter_cooldown_timer[i] == 0)
                 {
                     players[i+1].gun = 1;
                     if (i + 1 == my_id) gun = 1;
+                }
+            }
+
+            if (disagree_msg_timer[i] > 0)
+            {
+                disagree_msg_timer[i]--;
+                if (disagree_msg_timer[i] == 0)
+                {
+                    mvprintw(20, 0, "                                            ");
+                    if (invited == 1) 
+                    {
+                        attron(COLOR_PAIR(2));
+                        mvprintw(20, 0, "Your partner is inviting you to combine.");
+                        attroff(COLOR_PAIR(2));
+                    }
                 }
             }
         }
@@ -445,9 +468,8 @@ void process_line(char *line) {
                 }
             }
         }
-
     }
-    else if (line[0] == 'P') 
+    else if (line[0] == 'P')
     {
         int id, role, x, y, blood;
         sscanf(line, "P %d %d %d %d %d", &id, &role, &x, &y, &blood);
@@ -462,7 +484,7 @@ void process_line(char *line) {
 
         draw_game_screen();
     }
-    else if (strncmp(line, "BULLET", 6) == 0) 
+    else if (strncmp(line, "BULLET", 6) == 0)
     {
         int shooter, hit, x, y, remain;
         sscanf(line, "BULLET %d %d %d %d %d\n", &shooter, &hit, &x, &y, &remain);
@@ -478,7 +500,7 @@ void process_line(char *line) {
         my_bullets = remain;
         draw_game_screen();
     }
-    else if (strncmp(line, "HIT", 3)==0) 
+    else if (strncmp(line, "HIT", 3)==0)
     {
         int shooter, hit, x, y, remain;
         sscanf(line, "HIT %d %d %d %d %d\n", &shooter, &hit, &x, &y, &remain);
@@ -552,14 +574,24 @@ void process_line(char *line) {
         my_bullets = remain;
         draw_game_screen();
     }
+    else if (strncmp(line, "RESCUE", 6) == 0)
+    {
+        int helper, helped;
+        sscanf(line, "RESCUE %d rescues %d\n", &helper, &helped);
+
+        players[helper].blood_bag = 0;
+        players[helped].hp = 2;
+
+        if (my_id == helper) blood_bag = 0;
+        if (my_id == helped) my_hp = 2;
+    }
     else if (strncmp(line, "INVITE", 6) == 0)
     {
         attron(COLOR_PAIR(2));
         if ((my_id == 1 && line[7] == '2') || (my_id == 2 && line[7] == '1'))
         {
-            invite = 1;
+            invited = 1;
             mvprintw(20, 0, "Your partner is inviting you to combine.");
-            // mvprintw(19, 0, "Your partner is inviting you to combine.");
             refresh();
         }
         if ((my_id == 1 && line[7] == '1') || (my_id == 2 && line[7] == '2'))
@@ -571,7 +603,110 @@ void process_line(char *line) {
         attroff(COLOR_PAIR(2));
         refresh();
     }
-    else if (strncmp(line, "Game Over! ", 11) == 0){
+    else if (strncmp(line, "AGREE", 5) == 0)
+    {
+        int shooter, mover;
+        sscanf(line, "AGREE %d agrees %d\n", &shooter, &mover);
+
+        players[shooter].combine = 1;
+        players[mover].combine = 1;
+        players[mover].gun = 0;
+        players[mover].control = 1;
+
+        if (my_id == 1 || my_id == 2)
+        {
+            mvprintw(19, 0, "                                            ");
+            mvprintw(20, 0, "                                            ");
+            
+            invite = 0;
+            invited = 0;
+            combine = 1;
+        }
+
+        if (my_id == shooter)
+        {
+            attron(COLOR_PAIR(2));
+            mvprintw(19, 0, "You are the shooter.");
+            attroff(COLOR_PAIR(2));
+
+            is_shooter = 1;
+        }
+        if (my_id == mover)
+        {
+            attron(COLOR_PAIR(2));
+            mvprintw(19, 0, "You are the mover.");
+            attroff(COLOR_PAIR(2));
+
+            is_mover = 1;
+            gun = 0;
+        }
+    }
+    else if (strncmp(line, "DISAGREE", 8) == 0)
+    {
+        int a, b;
+        sscanf(line, "DISAGREE %d disagrees %d", &a, &b);
+
+        if (my_id == a)
+        {
+            invited = 0;
+            mvprintw(20, 0, "                                            ");
+            refresh();
+        }
+
+        if (my_id == b)
+        {
+            invite = 0;
+            mvprintw(19, 0, "                                         ");
+            refresh();
+
+            attron(COLOR_PAIR(2));
+            mvprintw(20, 0, "Your partner disagrees with your invitation.");
+            refresh();
+            attroff(COLOR_PAIR(2));
+
+            disagree_msg_timer[b - 1] = 10;
+
+            refresh();
+        }
+    }
+    else if (strncmp(line, "SPLIT", 5) == 0)
+    {
+        int somebody1, somebody2;
+        sscanf(line, "SPLIT %d splits %d\n", &somebody1, &somebody2);
+
+        int shooter, mover;
+        if (players[somebody1].gun == 1)
+        {
+            shooter = somebody1;
+            mover = somebody2;
+        }
+        else
+        {
+            shooter = somebody2;
+            mover = somebody1;
+        }
+
+        players[mover].combine = 0;
+        players[mover].control = 0;
+        players[mover].gun = 1;
+        players[shooter].combine = 0;
+
+        if (my_id == 1 || my_id == 2)
+        {
+            combine = 0;
+            mvprintw(19, 0, "                         ");
+        }
+
+        if (my_id == shooter) is_shooter = 0;
+
+        if (my_id == mover)
+        {
+            is_mover = 0;
+            gun = 1;
+        }
+    }
+    else if (strncmp(line, "Game Over! ", 11) == 0)
+    {
         clear();
         mvprintw(0, 0, "%s", line);
         mvprintw(2, 0, "Press 'q' to leave the game.");
@@ -579,7 +714,6 @@ void process_line(char *line) {
         refresh();
     }
 }
-
 
 
 void *recv_thread(void *arg) {
@@ -605,9 +739,8 @@ void *recv_thread(void *arg) {
 }
 
 
-
 void *input_thread(void *arg) {
-    while (1) 
+    while (1)
     {
         int ch = getch();
         if (ch == 'q') {
@@ -632,102 +765,180 @@ void *input_thread(void *arg) {
         if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) continue;
 
         int block = 0;
-        for (int i = 1; i <= 6; i++) 
+        if (ch == 'w' || ch == 's' || ch == 'a' || ch == 'd')
         {
-            if (i == my_id) continue;
-            if (!players[i].live) continue;
-            if (players[i].x == x && players[i].y == y) 
+            for (int i = 1; i <= 6; i++)
             {
-                block = 1;
-                break;
+                if (i == my_id) continue;
+                if (!players[i].live) continue;
+                if (players[i].x == x && players[i].y == y)
+                {
+                    block = 1;
+                    break;
+                }
             }
         }
 
         if (block) continue;
 
-        if (ch=='w') send(sockfd, "MOVE U\n", 7, 0);
-        if (ch=='s') send(sockfd, "MOVE D\n", 7, 0);
-        if (ch=='a') send(sockfd, "MOVE L\n", 7, 0);
-        if (ch=='d') send(sockfd, "MOVE R\n", 7, 0);
-
-        if (my_id >= 3 && my_id <= 6 && ch == '0')
+        if (combine == 0 || is_mover == 1)
         {
-            int can_use_shield = 1;
-            for (int i = 0; i < 4; i++)
+            if (ch=='w') send(sockfd, "MOVE U\n", 7, 0);
+            if (ch=='s') send(sockfd, "MOVE D\n", 7, 0);
+            if (ch=='a') send(sockfd, "MOVE L\n", 7, 0);
+            if (ch=='d') send(sockfd, "MOVE R\n", 7, 0);
+        }
+
+        if (my_id >= 3 && my_id <= 6)
+        {
+            if (ch == '0')
             {
-                if (x == shields[i].x && y == shields[i].y)
+                int can_use_shield = 1;
+                for (int i = 0; i < 4; i++)
                 {
-                    can_use_shield = 0;
-                    break;
+                    if (x == shields[i].x && y == shields[i].y)
+                    {
+                        can_use_shield = 0;
+                        break;
+                    }
+                }
+            
+                if (players[my_id].shield == 1 && can_use_shield == 1) send(sockfd, "SHIELD\n", 6, 0);
+            }
+
+            if (blood_bag > 0)
+            {
+                if (ch == '1')
+                {
+                    if (players[3].hp == 1)
+                    {
+                        char buf[64];
+                        snprintf(buf, sizeof(buf), "RESCUE %d rescues 3\n", my_id);
+                        send(sockfd, buf, strlen(buf), 0);
+                    }
+                }
+                else if (ch == '2')
+                {
+                    if (players[4].hp == 1)
+                    {
+                        char buf[64];
+                        snprintf(buf, sizeof(buf), "RESCUE %d rescues 4\n", my_id);
+                        send(sockfd, buf, strlen(buf), 0);
+                    }
+                }
+                else if (ch == '3')
+                {
+                    if (players[5].hp == 1)
+                    {
+                        char buf[64];
+                        snprintf(buf, sizeof(buf), "RESCUE %d rescues 5\n", my_id);
+                        send(sockfd, buf, strlen(buf), 0);
+                    }
+                }
+                else if (ch == '4')
+                {
+                    if (players[6].hp == 1)
+                    {
+                        char buf[64];
+                        snprintf(buf, sizeof(buf), "RESCUE %d rescues 6\n", my_id);
+                        send(sockfd, buf, strlen(buf), 0);
+                    }
                 }
             }
-            
-            if (players[my_id].shield == 1 && can_use_shield == 1) send(sockfd, "SHIELD\n", 6, 0);
         }
 
         if ((my_id == 1 && players[1].gun == 1) || (my_id == 2 && players[2].gun == 1))
         {
-            if (ch=='i') send(sockfd, "SHOOT U 1\n", 9, 0);
-            if (ch=='k') send(sockfd, "SHOOT D 1\n", 9, 0);
-            if (ch=='j') send(sockfd, "SHOOT L 1\n", 9, 0);
-            if (ch=='l') send(sockfd, "SHOOT R 1\n", 9, 0);
+            if (is_shooter == 1)
+            {
+                refresh();
+                if (ch=='i')
+                {
+                    refresh();
+                    send(sockfd, "SHOOT U 2\n", 9, 0);
+                }
+                if (ch=='k') 
+                {
+                    refresh();
+                    send(sockfd, "SHOOT D 2\n", 9, 0);
+                }
+                if (ch=='j') 
+                {
+                    refresh();
+                    send(sockfd, "SHOOT L 2\n", 9, 0);
+                }
+                if (ch=='l') 
+                {
+                    refresh();
+                    send(sockfd, "SHOOT R 2\n", 9, 0);
+                }
+            }
+            else
+            {
+                if (ch=='i') send(sockfd, "SHOOT U 1\n", 9, 0);
+                if (ch=='k') send(sockfd, "SHOOT D 1\n", 9, 0);
+                if (ch=='j') send(sockfd, "SHOOT L 1\n", 9, 0);
+                if (ch=='l') send(sockfd, "SHOOT R 1\n", 9, 0);
+            }
         }
 
-        if (my_id == 1 && combine == 0)
+        if (my_id == 1 && combine == 0 && players[2].live == 1)
         {
             if (ch == 'h') send(sockfd, "INVITE 1 invites 2\n", 18, 0);
         }
-        if (my_id == 2 && combine == 0)
+        if (my_id == 2 && combine == 0 && players[1].live == 1)
         {
             if (ch == 'h') send(sockfd, "INVITE 2 invites 1\n", 18, 0);
         }
 
-        if (my_id == 1 && invite == 1)
+        if (my_id == 1 && invited == 1)
         {
             if (ch == 'y') send(sockfd, "AGREE 1 agrees 2\n", 16, 0);
             if (ch == 'n') send(sockfd, "DISAGREE 1 disagrees 2\n", 22, 0);
         }
-        if (my_id == 2 && invite == 1)
+        if (my_id == 2 && invited == 1)
         {
             if (ch == 'y') send(sockfd, "AGREE 2 agrees 1\n", 16, 0);
             if (ch == 'n') send(sockfd, "DISAGREE 2 disagrees 1\n", 22, 0);
         }
 
-
-
-        
+        if (my_id == 1 && combine == 1)
+        {
+            if (ch == 'g') send(sockfd, "SPLIT 1 splits 2\n", 16, 0);
+        }
+        if (my_id == 2 && combine == 1)
+        {
+            if (ch == 'g') send(sockfd, "SPLIT 2 splits 1\n", 16, 0);
+        }
     }
     return NULL;
 }
 
-
-
-
 int main(int argc, char *argv[]) {
 
-    
-    struct sockaddr_in	servaddr;
+   
+    struct sockaddr_in servaddr;
 
     if (argc < 2) {
-        // printf("usage: %s <server_ip>\n", argv[0]);
+        printf("usage: %s <server_ip>\n", argv[0]);
         return 1;
     }
 
    
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    
+   
     bzero(&servaddr, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
     servaddr.sin_port = htons(9877);
     inet_pton(AF_INET, argv[1], &servaddr.sin_addr);
 
     Connect(sockfd, (SA*)&servaddr, sizeof(servaddr));
-      
+     
 
     // ncurses setup
     initscr();  // init ncurse screen
     noecho();   // 不會把鍵盤輸入顯示出來
-    cbreak();   
+    cbreak();  
     keypad(stdscr, TRUE);   // 可加特殊建
 
     start_color();
@@ -738,10 +949,8 @@ int main(int argc, char *argv[]) {
     pthread_create(&t1, NULL, recv_thread, NULL);
     pthread_create(&t2, NULL, input_thread, NULL);
 
-
     pthread_join(t1, NULL);
     pthread_join(t2, NULL);
-
 
     endwin();
     return 0;

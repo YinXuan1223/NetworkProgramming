@@ -1,31 +1,31 @@
-#include	"unp.h"
+#include "unp.h"
 
-#define     MAXROOM 5
-#define		MAXPLAYER 6
+#define     MAXROOM 10
+#define     MAXPLAYER 6
 #define     MAP_W 20
 #define     MAP_H 12
 #define     RELOGIN_Q_SIZE 1024
 
 
 typedef struct{
-	int fd;
-	int prid;	// player id in room
-	int pgid;	// global player id
-	int role;	// 0 ghost, 1 human
-	int x, y;	// coordinate
+    int fd;
+    int prid; // player id in room
+    int pgid; // global player id
+    int role; // 0 ghost, 1 human
+    int x, y; // coordinate
 
-	int blood;
-	int extra_blood;
+    int blood;
+    int extra_blood;
 
-	int can_shoot; // 0 human or ghost_mover, 1 ghost_origin, 2 ghost_shooter
-	int can_move; // 0 ghost_shooter, 1 others
-    int can_shield; 
+    int can_shoot; // 0 human or ghost_mover, 1 ghost_origin, 2 ghost_shooter
+    int can_move; // 0 ghost_shooter, 1 others
+    int can_shield;
 
     int shoot_cdtimer;
     int shield_cdtimer;
 
     int is_combined;
-	int is_alive;
+    int is_alive;
     int is_ingame;
 
 } PlayerSlot;
@@ -34,18 +34,18 @@ typedef struct{
     int has_init_player;
     int shield;
     int shield_by;
-	int shield_timer;
+int shield_timer;
 } MapGrid;
 
 typedef struct{
-	int rid;
-	int status;	// 0 waiting, 1 running
-	int player_cnt;
-	PlayerSlot players[MAXPLAYER+1];
-	MapGrid map[MAP_H][MAP_W];
-	
-	int bullet_cnt;
-	int global_timer;
+int rid;
+int status; // 0 waiting, 1 running
+int player_cnt;
+PlayerSlot players[MAXPLAYER+1];
+MapGrid map[MAP_H][MAP_W];
+
+int bullet_cnt;
+int global_timer;
 } Room;
 
 Room rooms[MAXROOM];
@@ -77,8 +77,8 @@ int dequeue_relogin(void) {
 }
 
 int set_nonblock(int fd){
-	int flags = fcntl(fd, F_GETFL, 0);
-	if (flags < 0) return -1;
+int flags = fcntl(fd, F_GETFL, 0);
+if (flags < 0) return -1;
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
@@ -93,7 +93,7 @@ void broadcast_room(Room *rm, char *msg) {
 }
 
 void init_room(int rid) {
-    
+   
     Room *rm = &rooms[rid];
     rm -> rid = rid+1;
     rm -> status = 0;
@@ -110,7 +110,7 @@ void init_room(int rid) {
             rm -> map[y][x].shield_timer = 0;
             rm -> map[y][x].has_init_player = 0;
             rm -> map[y][x].shield_by = -1;
-        } 
+        }
     }
     rm -> bullet_cnt = 50;
     rm -> global_timer = 1500; // 5 minutes
@@ -129,6 +129,16 @@ void handle_move(char* cmd, Room *rm, PlayerSlot *ps){
     else if (d=='R') nx++;
     if (nx>=0 && nx<MAP_W && ny>=0 && ny<MAP_H) {
         ps->x = nx; ps->y = ny;
+        if (ps->is_combined){
+            for (int i = 1; i <= 2; i++){
+                if (i == ps->prid) continue;
+                if (rm->players[i].is_combined && rm->players[i].can_move == 0){
+                    rm->players[i].x = ps->x;
+                    rm->players[i].y = ps->y;
+                }
+            }
+        }
+
         char ev[128];
         snprintf(ev, sizeof(ev), "MOVE %d %d %d\n", ps->prid, ps->x, ps->y);
         broadcast_room(rm, ev);
@@ -136,9 +146,8 @@ void handle_move(char* cmd, Room *rm, PlayerSlot *ps){
 }
 
 void shooting(Room *rm, int tx, int ty, PlayerSlot *ps, int is_first){
-
     if (tx>=0 && tx<MAP_W && ty>=0 && ty<MAP_H) {
-        
+       
         rm->bullet_cnt--; // 這種寫法合體會一次扣兩顆
 
         int hit_id = -1;
@@ -148,7 +157,7 @@ void shooting(Room *rm, int tx, int ty, PlayerSlot *ps, int is_first){
             if (other->x==tx && other->y==ty && other->blood>0 && other->role == 1 && !rm->map[ty][tx].shield) {
                 other->blood -= 1;
                 hit_id = other->prid;
-                
+               
                 char ev[128];
                 if(other->blood==0){
                     snprintf(ev, sizeof(ev), "DIE %d %d %d %d %d\n", ps->prid, other->prid, tx, ty, rm->bullet_cnt); // 格式 : 發射的人, 被射中的人, 最後子彈x, 最後子彈y, 剩餘子彈 (有死)
@@ -163,49 +172,70 @@ void shooting(Room *rm, int tx, int ty, PlayerSlot *ps, int is_first){
             char ev[128];
             if(rm->map[ty][tx].shield) snprintf(ev, sizeof(ev), "SLDBULLET %d %d %d %d %d\n", ps->prid, -100, tx, ty, rm->bullet_cnt); // 格式 : 發射的人, 被射中的人(沒人被射中 -100), 最後子彈x, 最後子彈y, 剩餘子彈
             else snprintf(ev, sizeof(ev), "BULLET %d %d %d %d %d\n", ps->prid, -100, tx, ty, rm->bullet_cnt); // 格式 : 發射的人, 被射中的人(沒人被射中 -100), 最後子彈x, 最後子彈y, 剩餘子彈
-			broadcast_room(rm, ev);
+            broadcast_room(rm, ev);
         }
 
     }
 }
 
 void handle_shoot(char* cmd, Room *rm, PlayerSlot *ps){
+    if (ps->can_shoot == 0) return;
+    char d = cmd[6]; 
+    char distant = cmd[8];
+    int x = ps->x, y = ps->y;
+    int tx, ty, ttx, tty;
 
-    if(!ps->can_shoot) return;
+    printf("in handle_shoot %d %c\n", ps->prid, distant);
 
-    char d = cmd[6]; // SHOOT U 2
-    char distant = cmd[8]; 
-    int x = ps->x, y = ps->y, tx=-1, ty=-1, ttx=-1, tty=-1;
-    if (d=='U') { ty = y-1; tty = y-2; tx = x, ttx =x; }
-    else if (d=='D') { ty = y+1; tty = y+2; tx = x, ttx =x; }
-    else if (d=='L') { ty = y; tty = y; tx = x-1, ttx =x-2; }
-    else if (d=='R') { ty = y; tty = y; tx = x+1, ttx =x+2; }
-    
+    // 如果是合體中的 Shooter，強制使用 Mover 的位置發射
+    if (ps->is_combined && ps->can_move == 0) {
+        for (int i = 1; i <= MAXPLAYER; i++) {
+            // 尋找同房間內正在載著你的那個人 (Mover)
+            if (rm->players[i].is_combined && rm->players[i].can_move == 1 && i != ps->prid) {
+                x = rm->players[i].x;
+                y = rm->players[i].y;
+                break;
+            }
+        }
+    }
+
+    // 計算目標座標
+    tx = x; ty = y;
+    if (d == 'U') ty = y - 1;
+    else if (d == 'D') ty = y + 1;
+    else if (d == 'L') tx = x - 1;
+    else if (d == 'R') tx = x + 1;
+
+    // 執行第一格射擊
     shooting(rm, tx, ty, ps, 1);
 
-    if(distant == '1') {
-        ps->can_shoot = 0;
-        return;
+    // 如果距離是 2，計算第二格
+    if(distant == '2') {
+        ttx = tx; tty = ty;
+        if (d == 'U') tty = ty - 1;
+        else if (d == 'D') tty = ty + 1;
+        else if (d == 'L') ttx = tx - 1;
+        else if (d == 'R') ttx = tx + 1;
+        shooting(rm, ttx, tty, ps, 0);
     }
-    if(ps->can_shoot!=2) return;
 
-    shooting(rm, ttx, tty, ps, 0);
+    // 進入冷卻
     ps->can_shoot = 0;
-
+    ps->shoot_cdtimer = 25;
 }
 
 void handle_shield(char* cmd, Room *rm, PlayerSlot *ps){
 
     if(!ps->can_shield) return;
     ps->can_shield=0;
-	int sld_x = ps -> x;
-	int sld_y = ps -> y;
-	rm -> map[sld_y][sld_x].shield = 1;
-	rm -> map[sld_y][sld_x].shield_timer = 25;
+    int sld_x = ps -> x;
+    int sld_y = ps -> y;
+    rm -> map[sld_y][sld_x].shield = 1;
+    rm -> map[sld_y][sld_x].shield_timer = 25;
     rm -> map[sld_y][sld_x].shield_by = ps->prid;
-	char ev[128];
-	sprintf(ev, "SHIELD %d %d %d\n", ps->prid, sld_x, sld_y);
-	broadcast_room(rm, ev);
+    char ev[128];
+    sprintf(ev, "SHIELD %d %d %d\n", ps->prid, sld_x, sld_y);
+    broadcast_room(rm, ev);
 
 }
 
@@ -213,7 +243,7 @@ void handle_invite(char* cmd, Room *rm, PlayerSlot *ps){ //cmd 要長 "INVITE (�
     char inviter = cmd[7], invitee = cmd[17];
     char ev[128];
     sprintf(ev, "INVITE %c invites %c\n", inviter, invitee);
-    broadcast_room(rm, ev); 
+    broadcast_room(rm, ev);
 }
 
 void handle_agree(char* cmd, Room *rm, PlayerSlot *ps){ // cmd 要長 "AGREE (被邀請人) agrees (邀請人)"
@@ -221,12 +251,15 @@ void handle_agree(char* cmd, Room *rm, PlayerSlot *ps){ // cmd 要長 "AGREE (�
     char shooter = cmd[6], mover = cmd[15];
     int shooter_id = cmd[6]-'0', mover_id = cmd[15]-'0';
 
+    rm->players[shooter_id].can_shoot = 1;
     rm->players[shooter_id].is_combined = 1;
     rm->players[shooter_id].can_move = 0;
-    rm->players[shooter_id].can_shoot = 2;
     rm->players[mover_id].is_combined = 1;
     rm->players[mover_id].can_shoot = 0;
-    
+
+    rm->players[shooter_id].x = rm->players[mover_id].x;
+    rm->players[shooter_id].y = rm->players[mover_id].y;
+   
     char ev[128];
     sprintf(ev, "AGREE %c agrees %c\n", shooter, mover);
     broadcast_room(rm, ev);
@@ -235,7 +268,7 @@ void handle_agree(char* cmd, Room *rm, PlayerSlot *ps){ // cmd 要長 "AGREE (�
 void handle_disagree(char* cmd, Room *rm, PlayerSlot *ps){ // cmd 要長 "DISAGREE (被邀請人) disagrees (邀請人)"
     if(ps->is_combined) return;
     char shooter = cmd[9], mover = cmd[21];
-    
+   
     char ev[128];
     sprintf(ev, "DISAGREE %c disagrees %c\n", shooter, mover);
     printf("%s", ev);
@@ -243,11 +276,11 @@ void handle_disagree(char* cmd, Room *rm, PlayerSlot *ps){ // cmd 要長 "DISAGR
 }
 
 void handle_split(char* cmd, Room *rm, PlayerSlot *ps){ // cmd 要長 "SPLIT (某人) splits (某人)"
-    if(ps->is_combined) return;
-    int somebody1 = cmd[6]-'0', somebody2 = cmd[15]-'0';
+    int somebody1, somebody2;
+    sscanf(cmd, "SPLIT %d splits %d\n", &somebody1, &somebody2);
 
     int shooter, mover;
-    if(rm->players[somebody1].can_shoot==2){
+    if(rm->players[somebody1].can_shoot==1){
         shooter = somebody1;
         mover = somebody2;
     }
@@ -255,30 +288,29 @@ void handle_split(char* cmd, Room *rm, PlayerSlot *ps){ // cmd 要長 "SPLIT (�
         shooter = somebody2;
         mover = somebody1;
     }
-    
+   
     rm->players[shooter].x = rm->players[mover].x;
     rm->players[shooter].y = rm->players[mover].y;
     rm->players[shooter].is_combined = 0;
     rm->players[shooter].can_move = 1;
-    rm->players[shooter].can_shoot = 1;
+    //rm->players[shooter].can_shoot = 1;
 
     rm->players[mover].is_combined = 0;
     rm->players[mover].can_move = 1;
     rm->players[mover].can_shoot = 1;
-    
     char ev[128];
-    sprintf(ev, "SPLIT %c splits %c\n", shooter, mover);
+    sprintf(ev, "SPLIT %d splits %d\n", shooter, mover);
     broadcast_room(rm, ev);
 }
 
 void handle_rescue(char* cmd, Room *rm, PlayerSlot *ps){  // "RESCUE (補血的人) rescues (被補血的人)"
     if(!ps->extra_blood) return;
     char helper = cmd[7], helped = cmd[17];
-    int helper_id = cmd[6]-'0', helped_id = cmd[15]-'0';
+    int helper_id = cmd[7]-'0', helped_id = cmd[17]-'0';
 
     rm->players[helper_id].extra_blood--;
     rm->players[helped_id].blood++;
-    
+   
     char ev[128];
     sprintf(ev, "RESCUE %c rescues %c\n", helper, helped);
     broadcast_room(rm, ev);
@@ -290,29 +322,32 @@ void handle_player_cmd(Room *rm, PlayerSlot *ps, const char *line) {
     char cmd[128];
     strncpy(cmd, line, sizeof(cmd)-1);
     cmd[sizeof(cmd)-1]=0;
-    
-    if (strncmp(cmd, "MOVE ",5)==0) { //cmd 要長 "MOVE (方向)" 
+   
+    if (strncmp(cmd, "MOVE ",5)==0) { //cmd 要長 "MOVE (方向)"
         handle_move(cmd, rm, ps);
-    } 
-	else if (strncmp(cmd, "SHOOT ",6)==0) { //cmd 要長 "SHOOT (方向) (距離)" (目前都還是1)
+    }
+    else if (strncmp(cmd, "SHOOT ",6)==0) { //cmd 要長 "SHOOT (方向) (距離)" (目前都還是1)
         handle_shoot(cmd, rm, ps);
-    } 
-	else if (strncmp(cmd, "SHIELD",6)==0) {
-		handle_shield(cmd, rm, ps);
-	}
+    }
+    else if (strncmp(cmd, "SHIELD",6)==0) {
+    handle_shield(cmd, rm, ps);
+    }
     else if (strncmp(cmd, "INVITE ", 7)==0){ // cmd 要長 "INVITE (邀請人) invites (被邀請人)"
         handle_invite(cmd, rm, ps);
     }
     else if (strncmp(cmd, "AGREE ", 6)==0){ // cmd 要長 "AGREE (被邀請人) agrees (邀請人)"
         handle_agree(cmd, rm, ps);
     }
-    else if (strncmp(cmd, "DISAGREE ", 9) == 0){ 
+    else if (strncmp(cmd, "DISAGREE ", 9) == 0){
         handle_disagree(cmd, rm, ps);
+    }
+    else if (strncmp(cmd, "SPLIT", 5) == 0) {
+        handle_split(cmd, rm, ps);
     }
     else if (strncmp(cmd, "RESCUE ", 7)==0){  // cmd 要長 "RESCUE (補血的人) rescues (被補血的人)"
         handle_rescue(cmd, rm, ps);
     }
-	else if (strncmp(cmd, "QUIT",4)==0) {
+    else if (strncmp(cmd, "QUIT",4)==0) {
         ps->is_alive = 0;
         ps->is_ingame = 0;
         rm->players[ps->prid].fd = -1;
@@ -327,12 +362,12 @@ void handle_player_cmd(Room *rm, PlayerSlot *ps, const char *line) {
         rm->players[ps->prid].fd = -1;
         ps->is_ingame = 0;
         enqueue_relogin(ps->fd);
-    } 
+    }
     else if (strncmp(cmd, "DIELEAVE ", 9)==0) {
         rm->players[ps->prid].fd = -1;
         ps->is_ingame = 0;
         close(ps->fd);
-    } 
+    }
 }
 
 void update_state(int tick, Room* rm){
@@ -395,25 +430,31 @@ void control_timer(Room* rm){
     // 對 shoot 的檢查 (只看鬼)
     for(int i=1 ; i<=2 ; i++){
         if(rm->players[i].can_shoot) continue;
-    
+   
         rm->players[i].shoot_cdtimer--;
         if(rm->players[i].shoot_cdtimer==0){
             rm->players[i].shoot_cdtimer=25;
-            rm->players[i].can_shoot = 1;
+            if (rm->players[i].is_combined && rm->players[i].can_move == 0){
+                rm->players[i].can_shoot = 1;
+            }
+            else if (rm->players[i].is_combined == 0){
+                rm->players[i].can_shoot = 1;
+            }
+            
         }
-        
+       
     }
 
     // 對 shield 的檢查 (只看人)
     for(int i=3 ; i<=MAXPLAYER ; i++){
         if(rm->players[i].can_shield) continue;
-    
+   
         rm->players[i].shield_cdtimer--;
         if(rm->players[i].shield_cdtimer==0){
             rm->players[i].shield_cdtimer=100;
             rm->players[i].can_shield = 1;
         }
-        
+       
     }
 }
 
@@ -573,7 +614,7 @@ void *game_loop(void *arg) {
 
 void start_room(Room *rm) {
     rm->status = 1;
-	printf("Starting room %d:\n", rm->rid);
+printf("Starting room %d:\n", rm->rid);
 
     char msg[256];
     snprintf(msg, sizeof(msg), "GAME_START room=%d\n", rm->rid);
@@ -593,19 +634,17 @@ void assign_client_to_room(int clientfd) {
 
         Room *rm = &rooms[r];
         if (rm->status == 0 && rm->player_cnt < MAXPLAYER) { //status: 0 waiting, 1 running
-            
-			int idx = rm->player_cnt+1;
-            printf("in assign client to room , fd: %d, idx: %d\n", clientfd, idx);
-            printf("player cnt1: %d\n",rm->player_cnt);
+           
+int idx = rm->player_cnt+1;
             rm->players[idx].fd = clientfd;
             rm->players[idx].prid = idx; // 從 1 開始
             rm->players[idx].pgid = global_player_id++;
             rm->players[idx].role = (idx==1 || idx==2) ? 0 : 1; // 前兩個是鬼
-            rm->players[idx].x = 0; 
-			rm->players[idx].y = 0; 
+            rm->players[idx].x = 0;
+rm->players[idx].y = 0;
 
-			rm->players[idx].blood = 2;
-			rm->players[idx].extra_blood = 1;
+rm->players[idx].blood = 2;
+rm->players[idx].extra_blood = 1;
 
             rm->players[idx].can_shoot = (idx==1 || idx==2) ? 1 : 0;
             rm->players[idx].can_move = 1;
@@ -618,14 +657,19 @@ void assign_client_to_room(int clientfd) {
             rm->players[idx].is_alive = 1;
             rm->players[idx].is_ingame = 1;
             rm->player_cnt++;
-            printf("player cnt2: %d\n",rm->player_cnt);
+
             // 個別針對 clientfd 送歡迎資訊
             char welcome[256];
             snprintf(welcome, sizeof(welcome),
                 "WELCOME! Your information: Room %d, ID %d, Team %s. Waiting for others to join...\n", // 這些資訊可以簡單， client 那邊可以進一步拆解、重組
-				rm->rid, rm->players[idx].prid, (rm->players[idx].role==0)?"ghost":"human");
-			printf("%s", welcome);
+rm->rid, rm->players[idx].prid, (rm->players[idx].role==0)?"ghost":"human");
+printf("%s", welcome);
             Write(clientfd, welcome, strlen(welcome));
+
+            // 廣播有新成員加入
+            char joinmsg[128];
+            snprintf(joinmsg, sizeof(joinmsg), "New player %d just joined! Now we have %d members.\n", rm->players[idx].prid, rm->player_cnt); // 這些資訊可以簡單， client 那邊可以進一步拆解、重組
+            broadcast_room(rm, joinmsg);
 
             if (rm->player_cnt == MAXPLAYER) {
                 start_room(rm);
@@ -633,7 +677,7 @@ void assign_client_to_room(int clientfd) {
            
             return;
         }
-      
+     
     }
     char *busy = "SERVER_FULL\n";
     Write(clientfd, busy, strlen(busy));
@@ -644,7 +688,7 @@ void assign_client_to_room(int clientfd) {
 
 int main(int argc, char **argv){
 
-	printf("hehe handle move server start!\n");
+	printf("demo server start!\nThis is the final project of NP 2025\n");
 
 	int					listenfd, connfd;
 	socklen_t			clilen;
