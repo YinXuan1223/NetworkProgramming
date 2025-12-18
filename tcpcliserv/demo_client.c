@@ -248,6 +248,7 @@ void draw_private_status()
 
 void start_set()
 {
+    global_timer = 300;
     for (int i = 1; i <= 6; i++)
     {
         players[i].x = -1;
@@ -750,6 +751,7 @@ void *input_thread(void *arg) {
         }
         if (ch=='e') {
             send(sockfd, "KEEP\n", 5, 0);
+            game_started = 0;
         }
         if (!game_started) continue;
 
